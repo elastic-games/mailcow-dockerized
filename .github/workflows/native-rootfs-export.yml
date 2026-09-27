@@ -2,7 +2,7 @@ name: Native Mail Rootfs Export
 on:
   push:
     branches: [elastic/native-runtime-2026-09-27]
-    paths: [native/export_rootfs.py, native/rehearse_unbound.py, native/rehearse_dovecot.py, native/peer_policy.py, native/canonical_store.py, native/tests/rehearse_store_ownership.py, native/pinned-images.json, .github/workflows/native-rootfs-export.yml]
+    paths: [native/export_rootfs.py, native/rehearse_unbound.py, native/rehearse_dovecot.py, native/rehearse_postfix.py, native/peer_policy.py, native/canonical_store.py, native/tests/rehearse_store_ownership.py, native/pinned-images.json, .github/workflows/native-rootfs-export.yml]
   workflow_dispatch:
     inputs:
       service:
@@ -59,6 +59,9 @@ jobs:
       - name: Rehearse Dovecot privilege profile, IMAP and flatcurve state
         if: matrix.service == 'dovecot-mailcow'
         run: sudo python3 native/rehearse_dovecot.py --artifacts "$RUNNER_TEMP/mailcow-native-artifacts" --output "$RUNNER_TEMP/mailcow-native-artifacts/dovecot-rehearsal.json"
+      - name: Rehearse Postfix durable SMTP queue and local-sink recovery
+        if: matrix.service == 'postfix-mailcow'
+        run: sudo python3 native/rehearse_postfix.py --artifacts "$RUNNER_TEMP/mailcow-native-artifacts" --output "$RUNNER_TEMP/mailcow-native-artifacts/postfix-rehearsal.json"
       - uses: actions/upload-artifact@v4
         with:
           name: native-rootfs-${{ matrix.service }}
