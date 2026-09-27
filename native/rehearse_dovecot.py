@@ -50,6 +50,11 @@ def rehearse(artifacts,output):
         run(['tar','--numeric-owner','--same-owner','--same-permissions','--xattrs','--acls','-xzf',str(artifact),'-C',str(root)])
         store=scratch/'mailstore';store.mkdir();os.chown(store,5000,5000)
         secret=scratch/'host-secret';secret.write_text('synthetic host marker');secret.chmod(0o600)
+        overlapping=scratch/'uid999-state';overlapping.write_text('synthetic legacy-owner state');os.chown(overlapping,999,999);overlapping.chmod(0o600)
+        # Canonical state retains legacy IDs beneath root0700 host ancestors.
+        # The unrelated host app sharing UID999 must not traverse to this file.
+        host_probe='import os;os.setgroups([]);os.setgid(999);os.setuid(999);\ntry:open('+repr(str(overlapping))+').read()\nexcept PermissionError:pass\nelse:raise AssertionError("Host UID999 crossed protected ancestor")'
+        run(['/usr/bin/python3','-c',host_probe])
         config=scratch/'dovecot.conf'
         config.write_text('''protocols = imap lmtp sieve
 listen = 127.0.0.1
@@ -99,6 +104,7 @@ plugin {
         properties=['RootDirectory='+str(root),'NetworkNamespacePath=/run/netns/'+namespace,
                     'BindReadOnlyPaths='+str(config)+':/etc/dovecot/native-fixture.conf',
                     'BindPaths='+str(store)+':/var/vmail','ReadWritePaths=/var/vmail',
+                    'BindReadOnlyPaths='+str(overlapping)+':/run/legacy-uid999-state',
                     'PrivateUsers=full','PrivatePIDs=yes','MountAPIVFS=yes','PrivateDevices=yes','BindLogSockets=no',
                     'ProtectSystem=strict','ProtectHome=yes','NoNewPrivileges=yes','ProtectControlGroups=strict',
                     'ProtectKernelTunables=yes','ProtectKernelModules=yes','ProtectKernelLogs=yes',
@@ -131,6 +137,12 @@ for entry in os.listdir('/proc'):
     if entry.isdigit():assert not os.path.exists('/proc/'+entry+'/root'+secret)
 # Exercise available SYS_CHROOT, saved cwd and repeated parent traversal. This
 # may escape a child jail but must not escape the complete service root mount.
+child=os.fork()
+if child==0:
+    os.setgroups([999]);os.setgid(999);os.setuid(999)
+    assert open('/run/legacy-uid999-state').read()=='synthetic legacy-owner state'
+    os._exit(0)
+assert os.waitpid(child,0)[1]==0
 fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY);os.mkdir('/tmp/jail');os.chroot('/tmp/jail');os.fchdir(fd)
 for _ in range(20):os.chdir('..')
 os.chroot('.');os.chdir('/')
@@ -146,7 +158,7 @@ for entry in os.listdir('/proc'):
             result={'passed':True,'service':'dovecot-mailcow','systemdVersion':version,'sourceImage':source['sourceImage'],
                     'capabilityProfile':CAPS,'privateUsersFull':True,'privatePIDs':True,'privateNamespaceUnprivilegedPortStart':0,
                     'realImapLoginAppendFlagsCopySearch':True,'realFlatcurveIndex':True,'lmtpBanner':True,'manageSieveBanner':True,
-                    'sysChrootCwdEscapeCannotReachHost':True,'procRootHostSecretDenied':True,'hostControlSocketsAbsent':True,
+                    'sysChrootCwdEscapeCannotReachHost':True,'procRootHostSecretDenied':True,'hostControlSocketsAbsent':True,'hostOverlappingUid999Denied':True,'insideBoundUid999StateReadable':True,
                     'memoryCurrentBytes':memory,'memoryMaxBytes':256*1024*1024,'noProductionData':True,
                     'publicListeners':False,'outboundNetwork':False}
         except Exception:
