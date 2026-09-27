@@ -47,7 +47,7 @@ def rehearse_jobs(profiles, store, scratch, adapter):
     def unit(argv, extra=''):
         command = ('/run/mailcow-log-pipe', '--lease-dir', '/run/mailcow-lease', '--generation', 'native', '--', *argv)
         return '[Unit]\n' + extra + '[Service]\nType=exec\nSlice=mailcow-jobs.slice\n' + properties + '\nExecStart=' + ' '.join(map(quote_exec, command)) + '\n'
-    counter = 'import os,time;f=os.open("/var/vmail/schedule-fixture",os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600);os.write(f,b"started\\n");os.close(f);time.sleep(4)'
+    counter = 'import os,time;f=os.open("/var/vmail/schedule-fixture",os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600);os.write(f,b"started\\n");os.close(f);time.sleep(15)'
     files = {
         names[0]: unit(('/usr/bin/python3', '-c', counter)),
         names[1]: unit(('/usr/bin/python3', '-c', counter)),
@@ -72,6 +72,12 @@ def rehearse_jobs(profiles, store, scratch, adapter):
             installed.append(path)
         run(['/usr/bin/systemctl', 'daemon-reload'])
         run(['/usr/bin/systemctl', 'start', names[2]])
+        # Type=exec start acknowledges exec of the lease guard, not completion
+        # of its child. Observe child completion before checking output.
+        deadline = time.monotonic() + 10
+        while status(names[2]) in ('active', 'activating'):
+            if time.monotonic() > deadline: raise TimeoutError('Literal fixture did not finish')
+            time.sleep(.1)
         assert (mail / 'literal-fixture').read_text() == 'fixture:100%literal\n'
         run(['/usr/bin/systemctl', 'start', '--no-block', names[0]])
         deadline = time.monotonic() + 10
