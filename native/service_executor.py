@@ -110,18 +110,31 @@ class Executor:
     def command(self, unit, argv, user='root', data=b'', text_maximum=None):
         if unit not in self.profiles or not argv or not argv[0].startswith('/'): raise ValueError('Fixed service command required')
         action_unit = 'mailcow-action-' + uuid.uuid4().hex + '.service'
-        command = ['/usr/bin/systemd-run', '--quiet', '--wait', '--pipe', '--collect', '--unit=' + action_unit,
+        command = ['/usr/bin/systemd-run', '--quiet', '--wait', '--pipe', '--collect', '--slice=mailcow-actions.slice', '--unit=' + action_unit,
                    *['--property=' + value for value in self.profiles[unit].properties(user)], '--', *argv]
         spool = self.spool_budget.open(text_maximum) if text_maximum is not None else None
-        try:
-            # Old HTTP caller timeout60s did not kill Docker exec. Keep the
-            # operation supervised and leased until it actually finishes.
-            with self.store.lease('native'): return bounded(command, data, timeout=None, spool=spool)
-        except BaseException:
-            # systemd-run's death alone does not terminate its transient unit.
-            bounded(['/usr/bin/systemctl', 'stop', '--', action_unit], timeout=8)
-            if spool: spool.close()
-            raise
+        with self.store.lease('native'):
+            try:
+                # Old HTTP caller timeout60s did not kill Docker exec. Keep the
+                # operation supervised and leased until it actually finishes.
+                return bounded(command, data, timeout=None, spool=spool)
+            except BaseException:
+                # Retain lease through stop AND verified absence. Unobservable
+                # systemd state or an uninterruptible task must stay blocking.
+                group = Path('/sys/fs/cgroup/mailcow.slice/mailcow-actions.slice') / action_unit
+                while True:
+                    try:
+                        bounded(['/usr/bin/systemctl', 'kill', '--kill-whom=all', '--signal=KILL', '--', action_unit], timeout=8)
+                        bounded(['/usr/bin/systemctl', 'stop', '--no-block', '--', action_unit], timeout=8)
+                        code, output = bounded(['/usr/bin/systemctl', 'show', '--property=ActiveState,Job', '--', action_unit], timeout=8)
+                        fields = dict(line.split('=', 1) for line in output.decode().splitlines() if '=' in line)
+                        try: populated = dict(line.split() for line in (group / 'cgroup.events').read_text().splitlines()).get('populated') != '0'
+                        except FileNotFoundError: populated = False
+                        if code == 0 and fields.get('ActiveState') in ('inactive', 'failed') and fields.get('Job') in ('0', '') and not populated: break
+                    except (OSError, ValueError, TimeoutError): pass
+                    time.sleep(.1)
+                if spool: spool.close()
+                raise
 
     def state(self, unit): return self.observer.state(unit)
     def host_stats(self): return self.observer.host_stats()
@@ -138,7 +151,7 @@ class Executor:
         service = next((name for name, unit in UNITS.items() if unit == plan.unit), None)
         action = 'exec' if plan.operation.startswith('exec__') else plan.operation
         if service is None or compile_action(service, action, request) != plan: raise ValueError('Untrusted execution plan')
-        with self.locks[plan.unit]:
+        with self.locks[plan.unit], self.store.lease('native'):
             if plan.primitive == 'unit-control':
                 with self.store.lease('native'): code, output = bounded(list(plan.argv), timeout=None)
                 return self.generic(code, output)

@@ -185,6 +185,22 @@ if int(sys.argv[3])==200:
             assert not replacement.receive(signed) and len(executions) == 1
             run(['/usr/bin/systemctl', 'stop', '--', 'mailcow-dovecot.service'])
             active.remove('mailcow-dovecot.service')
+            # A deliberately killed controller loses its flock, while its
+            # independently supervised action still writes/exists. Dedicated
+            # fixed action slice must block transition without any PID journal.
+            controller_code = '''import sys,time,subprocess
+sys.path.insert(0,sys.argv[1]);from canonical_store import CanonicalStore
+with CanonicalStore(sys.argv[2]).lease('native'):
+ subprocess.run(['/usr/bin/systemd-run','--quiet','--unit=mailcow-action-crash-fixture.service','--slice=mailcow-actions.slice','/bin/sleep','30'],check=True)
+ print('ready',flush=True);time.sleep(60)
+'''
+            controller = subprocess.Popen(['/usr/bin/python3', '-c', controller_code, str(helpers), str(canonical_root)], stdout=subprocess.PIPE)
+            assert controller.stdout.readline().strip() == b'ready'
+            controller.kill(); controller.wait(timeout=5)
+            try: store.activate('legacy', ClosedCgroupProbe([]))
+            except StoreBusy: pass
+            else: raise AssertionError('Surviving action after controller death allowed switch')
+            run(['/usr/bin/systemctl', 'stop', '--', 'mailcow-action-crash-fixture.service'])
             # Slow supervised command exceeds old PHP60s wait without killing
             # valid work; wrapper reopens /dev/stdout and holds writer lease.
             slow = unit_command('mailcow-slow-fixture.service', ['/run/mailcow-log-pipe', '--lease-dir', '/run/mailcow-lease', '--generation', 'native', '--',
@@ -203,8 +219,13 @@ if int(sys.argv[3])==200:
                        'vmailMaildirMoveCleanup': True, 'maildirInodePreserved': True, 'full100MiBAnonymousSpool': True,
                        'spoolBudgetReleased': True, 'signedDuplicateAfterRestartDenied': True,
                        'supervisedBeyond60sCompleted': True, 'writerLeaseBlockedTransition': True,
+                       'killedControllerSurvivingActionBlockedTransition': True,
                        'devStdoutReopenPreserved': True, 'noProductionDataOrOutbound': True}
         finally:
+            # Fresh disposable CI units only: logs contain synthetic fixtures,
+            # no host configuration/accounts/credentials. Keep diagnostics for
+            # actual namespace/socket/ABI failures instead of guessing fixes.
+            subprocess.run(['/usr/bin/journalctl', '--no-pager', '-u', 'mailcow-dovecot.service', '-n', '60'], timeout=10)
             for name in units: subprocess.run(['/usr/bin/systemctl', 'stop', '--', name], capture_output=True, timeout=15)
             if server: server.shutdown(); server.server_close(); thread.join(timeout=5)
             if created: run(['ip', 'netns', 'delete', namespace])

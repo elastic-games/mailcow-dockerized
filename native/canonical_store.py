@@ -16,6 +16,7 @@ import tempfile
 
 GENERATIONS=frozenset(('legacy','native'))
 DIRECTORY_FLAGS=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW
+ACTION_CGROUP=Path('/sys/fs/cgroup/mailcow.slice/mailcow-actions.slice')
 
 
 class StoreBusy(RuntimeError):
@@ -131,8 +132,8 @@ class ClosedCgroupProbe:
     process can bypass these primitives; application units cannot access .control.
     """
     def __init__(self,paths):
-        self.paths=tuple(Path(path) for path in paths)
-        if not self.paths or any(not str(path).startswith('/sys/fs/cgroup/system.slice/') or '..' in path.parts for path in self.paths):
+        self.paths=tuple(dict.fromkeys([*(Path(path) for path in paths),ACTION_CGROUP]))
+        if any((path!=ACTION_CGROUP and not str(path).startswith('/sys/fs/cgroup/system.slice/')) or '..' in path.parts for path in self.paths):
             raise ValueError('Closed systemd cgroup paths required')
 
     def __call__(self):

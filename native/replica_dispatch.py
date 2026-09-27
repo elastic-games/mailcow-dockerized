@@ -23,6 +23,20 @@ class ReplicaDispatch:
             raise PermissionError('Root-owned protected replica ledger required')
         if enabled and not replicas_accepted: raise PermissionError('Every configured replica must pass signed adapter acceptance')
 
+    def prune_completed(self):
+        # Authentic envelopes expire after120s. Keep completed replay records
+        # for240s and never prune uncertain/incomplete records automatically.
+        for path in self.ledger.iterdir():
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_mode & 0o077 or info.st_size > 1024:
+                    raise PermissionError('Protected bounded replay record required')
+                with os.fdopen(fd, 'r', closefd=False) as file: record = json.load(file)
+            finally: os.close(fd)
+            if record.get('complete') is True and type(record.get('issued')) is int and self.auth.now() - record['issued'] > 240:
+                path.unlink()
+
     def receive(self, raw):
         message = json.loads(raw)
         plan, base, nonce = self.auth.verify(message)
@@ -31,11 +45,12 @@ class ReplicaDispatch:
         import hashlib
         name = hashlib.sha256(nonce.encode()).hexdigest() + '.json'
         with self.lock:
+            self.prune_completed()
             if len(list(self.ledger.iterdir())) >= 4096 and not (self.ledger / name).exists():
                 raise RuntimeError('Replica journal maintenance required')
             try: fd = os.open(self.ledger / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             except FileExistsError: return False
-            with os.fdopen(fd, 'wb') as file: file.write(canonical({'nonce': nonce, 'complete': False})); file.flush(); os.fsync(file.fileno())
+            with os.fdopen(fd, 'wb') as file: file.write(canonical({'nonce': nonce, 'issued': message['native_auth']['issued'], 'complete': False})); file.flush(); os.fsync(file.fileno())
             directory = os.open(self.ledger, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try: os.fsync(directory)
             finally: os.close(directory)
@@ -45,7 +60,7 @@ class ReplicaDispatch:
         # Keep replay id after completion; root operator may prune records older
         # than authenticated expiry only after confirming no uncertain action.
         fd = os.open(self.ledger / name, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
-        with os.fdopen(fd, 'wb') as file: file.write(canonical({'nonce': nonce, 'complete': True})); file.flush(); os.fsync(file.fileno())
+        with os.fdopen(fd, 'wb') as file: file.write(canonical({'nonce': nonce, 'issued': message['native_auth']['issued'], 'complete': True})); file.flush(); os.fsync(file.fileno())
         return True
 
     def broadcast(self, plan, base):
