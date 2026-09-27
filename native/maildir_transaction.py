@@ -22,10 +22,24 @@ from rooted_paths import rooted_directory, DIRECTORY_FLAGS
 
 def rename_no_replace(source_fd, source, dest_fd, dest):
     library = ctypes.CDLL(None, use_errno=True)
-    function = library.renameat2
-    function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-    function.restype = ctypes.c_int
-    if function(source_fd, os.fsencode(source), dest_fd, os.fsencode(dest), 1):
+    arguments = (ctypes.c_int(source_fd), ctypes.c_char_p(os.fsencode(source)),
+                 ctypes.c_int(dest_fd), ctypes.c_char_p(os.fsencode(dest)), ctypes.c_uint(1))
+    try:
+        function = library.renameat2
+        function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        function.restype = ctypes.c_int
+        result = function(*arguments)
+    except AttributeError:
+        # The exact pinned Alpine musl root lacks the libc renameat2 wrapper.
+        # Use the SAME kernel no-replace primitive, never a check+rename race.
+        # Exported runtime is Linux amd64 only; reject every other ABI before
+        # mutation. Linux arch/x86/entry/syscalls/syscall_64.tbl assigns 316.
+        if sys.platform != 'linux' or os.uname().machine != 'x86_64' or ctypes.sizeof(ctypes.c_void_p) != 8:
+            raise RuntimeError('No reviewed no-replace rename ABI available') from None
+        function = library.syscall
+        function.argtypes = [ctypes.c_long]; function.restype = ctypes.c_long
+        result = function(ctypes.c_long(316), *arguments)
+    if result:
         value = ctypes.get_errno()
         raise OSError(value, os.strerror(value))
 

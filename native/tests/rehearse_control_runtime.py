@@ -148,9 +148,9 @@ if int(sys.argv[3])==200:
             run(['ip', 'netns', 'add', namespace]); created = True
             run(['ip', '-n', namespace, 'link', 'set', 'lo', 'up'])
             run(['ip', 'netns', 'exec', namespace, 'sysctl', '-qw', 'net.ipv4.ip_unprivileged_port_start=0'])
-            identity_probe = '''import os,pathlib,json
+            identity_probe = '''import os,pathlib,json,sys
 assert os.getuid()==5000 and os.getgid()==5000
-expected=set(map(int,os.environ.get('EXPECTED_GROUPS','5000').split(',')))
+expected=set(map(int,sys.argv[1].split(',')))
 assert set(os.getgroups())==expected
 status=dict(line.split(':',1) for line in pathlib.Path('/proc/self/status').read_text().splitlines() if ':' in line)
 assert all(int(status[key].strip(),16)==0 for key in ('CapEff','CapPrm','CapAmb'))
@@ -166,7 +166,8 @@ print(json.dumps({'packagedVmailIdentity':True,'effectivePermittedAmbientCapsEmp
 '''
             # Same actual command wrapper/profile as maintenance actions; root
             # parent owns the lease, service-account child cannot open it.
-            code, identity = executor.command('mailcow-dovecot.service', ('/usr/bin/python3', '-c', identity_probe), 'vmail')
+            groups = profiles['mailcow-dovecot.service'].account('vmail')[2]
+            code, identity = executor.command('mailcow-dovecot.service', ('/usr/bin/python3', '-c', identity_probe, groups), 'vmail')
             assert code == 0 and json.loads(identity)['protectedControlUnreadable']
             properties = profiles['mailcow-dovecot.service'].properties()
             run(['/usr/bin/systemd-run', '--quiet', '--unit=mailcow-dovecot.service', *['--property=' + prop for prop in properties],

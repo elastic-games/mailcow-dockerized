@@ -1,9 +1,11 @@
 from pathlib import Path
+import ctypes
 import json
 import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from action_policy import compile_action
 from maildir_transaction import MaildirTransaction, rename_no_replace
@@ -48,6 +50,19 @@ class MaildirTests(unittest.TestCase):
         self.transaction.apply(name, journal)
         self.assertTrue(journal['complete']); self.assertTrue((self.index / 'new@fixture.invalid_index').is_dir())
         with self.assertRaises(ValueError): self.transaction.apply(name, {'moves': [{**moves[0], 'dest': ['../../escape']}], 'complete': False})
+
+    @unittest.skipUnless(os.uname().machine == 'x86_64', 'Reviewed amd64 musl fallback')
+    def test_real_kernel_syscall_without_libc_wrapper_remains_no_replace(self):
+        real_library = ctypes.CDLL(None, use_errno=True)
+        class WithoutWrapper:
+            syscall = real_library.syscall
+        target = self.mail / 'fixture.invalid/new'; target.mkdir()
+        with patch('maildir_transaction.ctypes.CDLL', return_value=WithoutWrapper()):
+            with self.assertRaises(FileExistsError): self.transaction.execute(self.plan('move', old_maildir='fixture.invalid/old', new_maildir='fixture.invalid/new'))
+            self.assertTrue(self.old.exists()); self.assertEqual(list(target.iterdir()), [])
+            target.rmdir()
+            self.transaction.execute(self.plan('move', old_maildir='fixture.invalid/old', new_maildir='fixture.invalid/new'))
+            self.assertTrue((target / 'new-arrival').is_file())
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)
