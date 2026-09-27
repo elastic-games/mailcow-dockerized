@@ -24,6 +24,7 @@ from service_observer import Observer
 from result_spool import SpoolBudget
 from replication_auth import ReplicaAuth, canonical
 from replica_dispatch import ReplicaDispatch
+from rehearse_jobs import rehearse_jobs
 
 
 class FixtureRedis:
@@ -263,6 +264,7 @@ with CanonicalStore(sys.argv[2]).lease('native'):
             stdout, stderr = process.communicate(timeout=90)
             assert process.returncode == 0 and time.monotonic() - started >= 65
             assert b'pipe-reopened' in stdout and b'completed-after-caller-timeout' in stdout
+            job_receipt = rehearse_jobs(profiles, store, scratch, adapter)
             store.activate('legacy', lambda: [])
             receipt = {'passed': True, 'sourceImage': source['sourceImage'], 'actualKernelCallerPolicy': True,
                        'forgedHeaderIgnored': True, 'unregisteredUID0Denied': True, 'actualSieveFTSACLCommands': True,
@@ -273,7 +275,8 @@ with CanonicalStore(sys.argv[2]).lease('native'):
                        'nonrootChildCapsEmptyAndGroupsPreserved': True,
                        'droppedChildCannotReadOrInheritControl': True,
                        'packagedMuslNoReplaceDestinationExistsSourcePreserved': True,
-                       'devStdoutReopenPreserved': True, 'noProductionDataOrOutbound': True}
+                       'devStdoutReopenPreserved': True, 'noProductionDataOrOutbound': True,
+                       'schedulerFixture': job_receipt}
         finally:
             # Fresh disposable CI units only: logs contain synthetic fixtures,
             # no host configuration/accounts/credentials. Keep diagnostics for
