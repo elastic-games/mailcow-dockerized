@@ -58,6 +58,10 @@ def rehearse(artifacts,output):
         queue=scratch/'queue';data=scratch/'data';config=scratch/'config'
         for source_dir,destination in ((root/'var/spool/postfix',queue),(root/'var/lib/postfix',data),(root/'etc/postfix',config)):
             run(['cp','-a',str(source_dir),str(destination)])
+        # Fixture logfile is shared only by root/postfix inside this isolated
+        # root0700 ancestor; this permissive synthetic mode is not production
+        # logging policy. Journal sockets cannot be reopened via /dev/stdout.
+        data.chmod(0o755);log=data/'native-fixture.log';log.touch();log.chmod(0o666)
         (config/'main.cf').write_text('''compatibility_level = 3.10
 myhostname = native-fixture.invalid
 myorigin = native-fixture.invalid
@@ -76,7 +80,7 @@ smtp_tls_security_level = none
 smtpd_sasl_auth_enable = no
 alias_maps =
 alias_database =
-maillog_file = /dev/stdout
+maillog_file = /var/lib/postfix/native-fixture.log
 smtp_connect_timeout = 2s
 smtp_helo_timeout = 2s
 minimal_backoff_time = 2s
@@ -159,7 +163,9 @@ os.chroot('.');os.chdir('/');assert not os.path.exists(secret)
                     'queueDrainedAfterDelivery':True,'sysChrootCwdEscapeCannotReachHost':True,'procRootHostSecretDenied':True,
                     'hostControlSocketsAbsent':True,'memoryCurrentBytes':memory,'publicListeners':False,'outboundNetwork':False,'noProductionData':True}
         except Exception:
-            subprocess.run(['journalctl','--unit='+name,'--no-pager','--lines=80'],check=False,timeout=10);raise
+            subprocess.run(['journalctl','--unit='+name,'--no-pager','--lines=80'],check=False,timeout=10)
+            if log.exists():print(log.read_text(errors='replace')[-12000:])
+            raise
         finally:
             if started:subprocess.run(['systemctl','stop',name],check=False,timeout=15)
             if sink:
