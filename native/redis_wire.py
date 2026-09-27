@@ -44,10 +44,13 @@ class Redis:
     def connect(self):
         connection = socket.create_connection(self.address, timeout=5)
         file = connection.makefile('rb')
-        if self.password:
-            connection.sendall(encode(['AUTH', self.username, self.password] if self.username else ['AUTH', self.password]))
-            if decode(file) != b'OK': raise RuntimeError('Private Redis authentication failed')
-        return connection, file
+        try:
+            if self.password:
+                connection.sendall(encode(['AUTH', self.username, self.password] if self.username else ['AUTH', self.password]))
+                if decode(file) != b'OK': raise RuntimeError('Private Redis authentication failed')
+            return connection, file
+        except BaseException:
+            file.close(); connection.close(); raise
 
     def command(self, *parts):
         connection, file = self.connect()

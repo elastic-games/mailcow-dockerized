@@ -19,6 +19,7 @@ import time
 import uuid
 from action_policy import Plan, UNITS, compile_action
 from control_protocol import Reply
+from rooted_paths import rooted_directory
 
 MAX_OUTPUT = 4 * 1024 * 1024
 MASTER_CAPS = ('CHOWN', 'DAC_OVERRIDE', 'DAC_READ_SEARCH', 'FOWNER', 'FSETID', 'SETGID', 'SETUID', 'SYS_CHROOT', 'KILL')
@@ -273,15 +274,22 @@ class Executor:
         if code or len(hashes) != 1: return self.generic(1, b'password derivation failed')
         path = self.password_files[plan.unit]
         # Fixed operator-selected override file; atomic write retains owner/mode.
-        import stat, tempfile
-        before = path.lstat()
-        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1: raise ValueError('Fixed regular password file required')
-        fd, temp = tempfile.mkstemp(dir=path.parent, prefix='.native-password-')
-        try:
-            os.fchown(fd, before.st_uid, before.st_gid); os.fchmod(fd, stat.S_IMODE(before.st_mode))
-            with os.fdopen(fd, 'wb') as file: file.write(b'enable_password = "' + hashes[0] + b'";\n'); file.flush(); os.fsync(file.fileno())
-            os.replace(temp, path)
-        finally:
-            if os.path.exists(temp): os.unlink(temp)
+        import stat
+        relative = path.relative_to(self.store.root)
+        # Service config parents are writable by that service. Resolve every
+        # parent from the canonical fd without symlinks; otherwise an inside
+        # service could turn the host-side password write into a host escape.
+        with rooted_directory(self.store.root, relative.parts[:-1]) as parent:
+            before = os.stat(relative.name, dir_fd=parent, follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1: raise ValueError('Fixed regular password file required')
+            temporary = '.native-password-' + uuid.uuid4().hex
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+            try:
+                os.fchown(fd, before.st_uid, before.st_gid); os.fchmod(fd, stat.S_IMODE(before.st_mode))
+                with os.fdopen(fd, 'wb') as file: file.write(b'enable_password = "' + hashes[0] + b'";\n'); file.flush(); os.fsync(file.fileno())
+                os.rename(temporary, relative.name, src_dir_fd=parent, dst_dir_fd=parent); os.fsync(parent)
+            finally:
+                try: os.unlink(temporary, dir_fd=parent)
+                except FileNotFoundError: pass
         code, output = bounded(['/usr/bin/systemctl', 'restart', '--', plan.unit])
         return self.generic(code, output)
