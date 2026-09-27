@@ -58,16 +58,19 @@ def export(service, output):
                    'nativeArgs':config['process']['args'], 'imageEnvironmentKeys': sorted(x.split('=',1)[0] for x in config['process'].get('env',[])),
                    'sourceUser':config['process']['user'], 'sourceRootfsByteHint':row['unpackedBytes'],
                    'rootTreeAllocatedBytes':allocated,'rootTreeLogicalBytes':logical,
-                   'probe':probe, 'probePassed':False, 'probeOutput':None, 'noProductionData':True}
+                   'probe':probe,'probeRootReadOnly':True, 'probePassed':False, 'probeOutput':None, 'noProductionData':True}
         if probe:
             # Isolated PID/mount/network; versions/help/import only. No daemon
             # listener, mail writer, scheduler, production state or public route.
             # OCI images receive /dev from the runtime, not image layers. Supply
             # only minimal private devices, never a host /dev bind, for probes.
             bootstrap = ('import os,stat,subprocess,sys; root=sys.argv[1]; '
+                         'subprocess.run(["mount","--bind",root,root],check=True); '
+                         'subprocess.run(["mount","-o","remount,bind,ro",root],check=True); '
                          'subprocess.run(["mount","-t","tmpfs","-o","mode=755","tmpfs",root+"/dev"],check=True); '
                          '[(os.mknod(root+"/dev/"+name,stat.S_IFCHR|0o666,os.makedev(1,minor))) '
                          'for name,minor in (("null",3),("zero",5),("random",8),("urandom",9))]; '
+                         'os.environ["PYTHONDONTWRITEBYTECODE"]="1"; '
                          'os.chroot(root);os.chdir("/");os.execv(sys.argv[2],sys.argv[2:])')
             try:
                 checked = run(['unshare', '--mount', '--net', '--pid', '--fork', '/usr/bin/python3', '-c', bootstrap,
