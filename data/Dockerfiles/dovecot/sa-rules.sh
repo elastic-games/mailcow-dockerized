@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Direct caller identity is retained: curl executes in this service cgroup.
+mailcow_control_curl() {
+  if [[ "${MAILCOW_NATIVE_CONTROL:-0}" == "1" ]]; then
+    curl --unix-socket /run/mailcow-control.sock "$@"
+  else
+    curl "$@"
+  fi
+}
+if [[ "${MAILCOW_NATIVE_CONTROL:-0}" == "1" ]]; then
+  MAILCOW_CONTROL_URL=http://localhost
+else
+  MAILCOW_CONTROL_URL="https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network"
+fi
+
 # Create temp directories
 [[ ! -d /tmp/sa-rules-heinlein ]] && mkdir -p /tmp/sa-rules-heinlein
 
@@ -25,11 +39,11 @@ sed -i -e 's/\([^\\]\)\$\([^\/]\)/\1\\$\2/g' /etc/rspamd/custom/sa-rules
 
 if [[ "$(cat /etc/rspamd/custom/sa-rules | md5sum | cut -d' ' -f1)" != "${HASH_SA_RULES}" ]]; then
   CONTAINER_NAME=rspamd-mailcow
-  CONTAINER_ID=$(curl --silent --insecure https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/json | \
+  CONTAINER_ID=$(mailcow_control_curl --silent --insecure ${MAILCOW_CONTROL_URL}/containers/json | \
     jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" | \
     jq -rc "select( .name | tostring | contains(\"${CONTAINER_NAME}\")) | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id")
   if [[ ! -z ${CONTAINER_ID} ]]; then
-    curl --silent --insecure -XPOST --connect-timeout 15 --max-time 120 https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/${CONTAINER_ID}/restart
+    mailcow_control_curl --silent --insecure -XPOST --connect-timeout 15 --max-time 120 ${MAILCOW_CONTROL_URL}/containers/${CONTAINER_ID}/restart
   fi
 fi
 

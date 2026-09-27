@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Direct caller identity is retained: curl executes in this service cgroup.
+mailcow_control_curl() {
+  if [[ "${MAILCOW_NATIVE_CONTROL:-0}" == "1" ]]; then
+    curl --unix-socket /run/mailcow-control.sock "$@"
+  else
+    curl "$@"
+  fi
+}
+if [[ "${MAILCOW_NATIVE_CONTROL:-0}" == "1" ]]; then
+  MAILCOW_CONTROL_URL=http://localhost
+else
+  MAILCOW_CONTROL_URL="https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network"
+fi
+
 function array_by_comma { local IFS=","; echo "$*"; }
 
 # Wait for containers
@@ -32,7 +46,7 @@ session.save_path = "tcp://'${REDIS_HOST}':'${REDIS_PORT}'?auth='${REDISPASS}'"
 # Check mysql_upgrade (master and slave)
 CONTAINER_ID=
 until [[ ! -z "${CONTAINER_ID}" ]] && [[ "${CONTAINER_ID}" =~ ^[[:alnum:]]*$ ]]; do
-  CONTAINER_ID=$(curl --silent --insecure https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/json | jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" 2> /dev/null | jq -rc "select( .name | tostring | contains(\"mysql-mailcow\")) | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id" 2> /dev/null)
+  CONTAINER_ID=$(mailcow_control_curl --silent --insecure ${MAILCOW_CONTROL_URL}/containers/json | jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" 2> /dev/null | jq -rc "select( .name | tostring | contains(\"mysql-mailcow\")) | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id" 2> /dev/null)
   echo "Could not get mysql-mailcow container id... trying again"
   sleep 2
 done
@@ -44,7 +58,7 @@ until [[ ${SQL_UPGRADE_STATUS} == 'success' ]]; do
     echo "Tried to upgrade MySQL and failed, giving up after ${SQL_LOOP_C} retries and starting container (oops, not good)"
     break
   fi
-  SQL_FULL_UPGRADE_RETURN=$(curl --silent --insecure -XPOST https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/${CONTAINER_ID}/exec -d '{"cmd":"system", "task":"mysql_upgrade"}' --silent -H 'Content-type: application/json')
+  SQL_FULL_UPGRADE_RETURN=$(mailcow_control_curl --silent --insecure -XPOST ${MAILCOW_CONTROL_URL}/containers/${CONTAINER_ID}/exec -d '{"cmd":"system", "task":"mysql_upgrade"}' --silent -H 'Content-type: application/json')
   SQL_UPGRADE_STATUS=$(echo ${SQL_FULL_UPGRADE_RETURN} | jq -r .type)
   SQL_LOOP_C=$((SQL_LOOP_C+1))
   echo "SQL upgrade iteration #${SQL_LOOP_C}"
@@ -69,12 +83,12 @@ done
 
 # doing post-installation stuff, if SQL was upgraded (master and slave)
 if [ ${SQL_CHANGED} -eq 1 ]; then
-  POSTFIX=$(curl --silent --insecure https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/json | jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" 2> /dev/null | jq -rc "select( .name | tostring | contains(\"postfix-mailcow\")) | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id" 2> /dev/null)
+  POSTFIX=$(mailcow_control_curl --silent --insecure ${MAILCOW_CONTROL_URL}/containers/json | jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" 2> /dev/null | jq -rc "select( .name | tostring | contains(\"postfix-mailcow\")) | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id" 2> /dev/null)
   if [[ -z "${POSTFIX}" ]] || ! [[ "${POSTFIX}" =~ ^[[:alnum:]]*$ ]]; then
     echo "Could not determine Postfix container ID, skipping Postfix restart."
   else
     echo "Restarting Postfix"
-    curl -X POST --silent --insecure https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/${POSTFIX}/restart | jq -r '.msg'
+    mailcow_control_curl -X POST --silent --insecure ${MAILCOW_CONTROL_URL}/containers/${POSTFIX}/restart | jq -r '.msg'
     echo "Sleeping 5 seconds..."
     sleep 5
   fi
@@ -83,7 +97,7 @@ fi
 # Check mysql tz import (master and slave)
 TZ_CHECK=$(mariadb --skip-ssl --socket=/var/run/mysqld/mysqld.sock -u ${DBUSER} -p${DBPASS} ${DBNAME} -e "SELECT CONVERT_TZ('2019-11-02 23:33:00','Europe/Berlin','UTC') AS time;" -BN 2> /dev/null)
 if [[ -z ${TZ_CHECK} ]] || [[ "${TZ_CHECK}" == "NULL" ]]; then
-  SQL_FULL_TZINFO_IMPORT_RETURN=$(curl --silent --insecure -XPOST https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/${CONTAINER_ID}/exec -d '{"cmd":"system", "task":"mysql_tzinfo_to_sql"}' --silent -H 'Content-type: application/json')
+  SQL_FULL_TZINFO_IMPORT_RETURN=$(mailcow_control_curl --silent --insecure -XPOST ${MAILCOW_CONTROL_URL}/containers/${CONTAINER_ID}/exec -d '{"cmd":"system", "task":"mysql_tzinfo_to_sql"}' --silent -H 'Content-type: application/json')
   echo "MySQL mysql_tzinfo_to_sql - debug output:"
   echo ${SQL_FULL_TZINFO_IMPORT_RETURN}
 fi

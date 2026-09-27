@@ -2,7 +2,7 @@ name: Native Mail Rootfs Export
 on:
   push:
     branches: [elastic/native-runtime-2026-09-27]
-    paths: [native/export_rootfs.py, native/rehearse_unbound.py, native/rehearse_dovecot.py, native/rehearse_postfix.py, native/peer_policy.py, native/canonical_store.py, native/tests/rehearse_store_ownership.py, native/pinned-images.json, .github/workflows/native-rootfs-export.yml]
+    paths: [native/**, data/web/inc/functions.docker.inc.php, data/Dockerfiles/acme/reload-configurations.sh, data/Dockerfiles/dovecot/sa-rules.sh, data/Dockerfiles/phpfpm/docker-entrypoint.sh, data/Dockerfiles/watchdog/watchdog.sh, .github/workflows/native-rootfs-export.yml]
   workflow_dispatch:
     inputs:
       service:
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - id: select
         env:
-          REQUESTED_SERVICE: ${{ inputs.service || 'unbound-mailcow' }}
+          REQUESTED_SERVICE: ${{ inputs.service || 'dovecot-mailcow' }}
         run: |
           python3 - <<'PY'
           import json,os,pathlib
@@ -41,6 +41,13 @@ jobs:
         service: ${{ fromJSON(needs.select.outputs.services) }}
     steps:
       - uses: actions/checkout@v4
+      - name: Test closed policies, Unix framing, spool lifetime and actual renameat2
+        run: |
+          python3 -m unittest discover -s native/tests -p 'test*.py'
+          bash -n data/Dockerfiles/acme/reload-configurations.sh
+          bash -n data/Dockerfiles/dovecot/sa-rules.sh
+          bash -n data/Dockerfiles/phpfpm/docker-entrypoint.sh
+          bash -n data/Dockerfiles/watchdog/watchdog.sh
       - name: Install off-host exporter tools
         run: |
           sudo apt-get update -qq
@@ -59,6 +66,9 @@ jobs:
       - name: Rehearse Dovecot privilege profile, IMAP and flatcurve state
         if: matrix.service == 'dovecot-mailcow'
         run: sudo python3 native/rehearse_dovecot.py --artifacts "$RUNNER_TEMP/mailcow-native-artifacts" --output "$RUNNER_TEMP/mailcow-native-artifacts/dovecot-rehearsal.json"
+      - name: Rehearse actual admin commands, caller identity, large results and slow lease
+        if: matrix.service == 'dovecot-mailcow'
+        run: sudo python3 native/tests/rehearse_control_runtime.py --artifacts "$RUNNER_TEMP/mailcow-native-artifacts" --output "$RUNNER_TEMP/mailcow-native-artifacts/control-runtime-rehearsal.json"
       - name: Rehearse Postfix durable SMTP queue and local-sink recovery
         if: matrix.service == 'postfix-mailcow'
         run: sudo python3 native/rehearse_postfix.py --artifacts "$RUNNER_TEMP/mailcow-native-artifacts" --output "$RUNNER_TEMP/mailcow-native-artifacts/postfix-rehearsal.json"

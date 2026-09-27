@@ -1,5 +1,27 @@
 #!/bin/bash
 
+mailcow_control_healthy() {
+  if [[ "${MAILCOW_NATIVE_CONTROL:-0}" == "1" ]]; then
+    mailcow_control_curl --silent --fail --connect-timeout 2 --max-time 2 "${MAILCOW_CONTROL_URL}/health" >/dev/null
+  else
+    nc -z dockerapi 443
+  fi
+}
+
+# Direct caller identity is retained: curl executes in this service cgroup.
+mailcow_control_curl() {
+  if [[ "${MAILCOW_NATIVE_CONTROL:-0}" == "1" ]]; then
+    curl --unix-socket /run/mailcow-control.sock "$@"
+  else
+    curl "$@"
+  fi
+}
+if [[ "${MAILCOW_NATIVE_CONTROL:-0}" == "1" ]]; then
+  MAILCOW_CONTROL_URL=http://localhost
+else
+  MAILCOW_CONTROL_URL="https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network"
+fi
+
 if [ "${DEV_MODE}" != "n" ]; then
   echo -e "\e[31mEnabled Debug Mode\e[0m"
   set -x
@@ -200,12 +222,12 @@ get_container_ip() {
     else
       sleep 0.5
       # get long container id for exact match
-      CONTAINER_ID=($(curl --silent --insecure https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/json | jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" | jq -rc "select( .name | tostring == \"${1}\") | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id"))
+      CONTAINER_ID=($(mailcow_control_curl --silent --insecure ${MAILCOW_CONTROL_URL}/containers/json | jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" | jq -rc "select( .name | tostring == \"${1}\") | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id"))
       # returned id can have multiple elements (if scaled), shuffle for random test
       CONTAINER_ID=($(printf "%s\n" "${CONTAINER_ID[@]}" | shuf))
       if [[ ! -z ${CONTAINER_ID} ]]; then
         for matched_container in "${CONTAINER_ID[@]}"; do
-          CONTAINER_IPS=($(curl --silent --insecure https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/${matched_container}/json | jq -r '.NetworkSettings.Networks[].IPAddress'))
+          CONTAINER_IPS=($(mailcow_control_curl --silent --insecure ${MAILCOW_CONTROL_URL}/containers/${matched_container}/json | jq -r '.NetworkSettings.Networks[].IPAddress'))
           for ip_match in "${CONTAINER_IPS[@]}"; do
             # grep will do nothing if one of these vars is empty
             [[ -z ${ip_match} ]] && continue
@@ -1078,12 +1100,12 @@ done
 # Monitor dockerapi
 (
 while true; do
-  while nc -z dockerapi 443; do
+  while mailcow_control_healthy; do
     sleep 3
   done
   log_msg "Cannot find dockerapi-mailcow, waiting to recover..."
   kill -STOP ${BACKGROUND_TASKS[*]}
-  until nc -z dockerapi 443; do
+  until mailcow_control_healthy; do
     sleep 3
   done
   kill -CONT ${BACKGROUND_TASKS[*]}
@@ -1143,12 +1165,12 @@ while true; do
   elif [[ ${com_pipe_answer} =~ .+-mailcow ]]; then
     kill -STOP ${BACKGROUND_TASKS[*]}
     sleep 10
-    CONTAINER_ID=$(curl --silent --insecure https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/json | jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" | jq -rc "select( .name | tostring | contains(\"${com_pipe_answer}\")) | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id")
+    CONTAINER_ID=$(mailcow_control_curl --silent --insecure ${MAILCOW_CONTROL_URL}/containers/json | jq -r ".[] | {name: .Config.Labels[\"com.docker.compose.service\"], project: .Config.Labels[\"com.docker.compose.project\"], id: .Id}" | jq -rc "select( .name | tostring | contains(\"${com_pipe_answer}\")) | select( .project | tostring | contains(\"${COMPOSE_PROJECT_NAME,,}\")) | .id")
     if [[ ! -z ${CONTAINER_ID} ]]; then
       if [[ "${com_pipe_answer}" == "php-fpm-mailcow" ]]; then
-        HAS_INITDB=$(curl --silent --insecure -XPOST https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/${CONTAINER_ID}/top | jq '.msg.Processes[] | contains(["php -c /usr/local/etc/php -f /web/inc/init_db.inc.php"])' | grep true)
+        HAS_INITDB=$(mailcow_control_curl --silent --insecure -XPOST ${MAILCOW_CONTROL_URL}/containers/${CONTAINER_ID}/top | jq '.msg.Processes[] | contains(["php -c /usr/local/etc/php -f /web/inc/init_db.inc.php"])' | grep true)
       fi
-      S_RUNNING=$(($(date +%s) - $(curl --silent --insecure https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/${CONTAINER_ID}/json | jq .State.StartedAt | xargs -n1 date +%s -d)))
+      S_RUNNING=$(($(date +%s) - $(mailcow_control_curl --silent --insecure ${MAILCOW_CONTROL_URL}/containers/${CONTAINER_ID}/json | jq .State.StartedAt | xargs -n1 date +%s -d)))
       if [ ${S_RUNNING} -lt 360 ]; then
         log_msg "Container is running for less than 360 seconds, skipping action..."
       elif [[ ! -z ${HAS_INITDB} ]]; then
@@ -1156,7 +1178,7 @@ while true; do
         sleep 60
       else
         log_msg "Sending restart command to ${CONTAINER_ID}..."
-        curl --silent --insecure -XPOST https://dockerapi.${COMPOSE_PROJECT_NAME}_mailcow-network/containers/${CONTAINER_ID}/restart
+        mailcow_control_curl --silent --insecure -XPOST ${MAILCOW_CONTROL_URL}/containers/${CONTAINER_ID}/restart
         notify_error "${com_pipe_answer}"
         log_msg "Wait for restarted container to settle and continue watching..."
         sleep 35
