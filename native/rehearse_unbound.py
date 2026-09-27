@@ -25,13 +25,13 @@ def run(argv, **kwargs):
     return subprocess.run(argv,check=True,timeout=60,**kwargs)
 
 
-def validate(artifacts):
-    receipt=json.loads((artifacts/'unbound-mailcow.receipt.json').read_text())
+def validate(artifacts,service='unbound-mailcow'):
+    receipt=json.loads((artifacts/(service+'.receipt.json')).read_text())
     pins=json.loads(Path(__file__).with_name('pinned-images.json').read_text())
-    expected=next(row['image'] for row in pins if row['service']=='unbound-mailcow')
-    if receipt.get('service')!='unbound-mailcow' or receipt.get('sourceImage')!=expected or not receipt.get('probePassed'):
+    expected=next(row['image'] for row in pins if row['service']==service)
+    if receipt.get('service')!=service or receipt.get('sourceImage')!=expected or not receipt.get('probePassed'):
         raise ValueError('Reviewed pinned Unbound artifact required')
-    artifact=artifacts/'unbound-mailcow.rootfs.tar.gz'
+    artifact=artifacts/(service+'.rootfs.tar.gz')
     with artifact.open('rb') as source:
         digest=hashlib.file_digest(source,'sha256').hexdigest()
     if digest!=receipt['artifactSHA256']:raise ValueError('Rootfs artifact digest mismatch')
