@@ -2,7 +2,7 @@ name: Native Mail Rootfs Export
 on:
   push:
     branches: [elastic/native-runtime-2026-09-27]
-    paths: [native/export_rootfs.py, native/pinned-images.json, .github/workflows/native-rootfs-export.yml]
+    paths: [native/export_rootfs.py, native/rehearse_unbound.py, native/peer_policy.py, native/pinned-images.json, .github/workflows/native-rootfs-export.yml]
   workflow_dispatch:
     inputs:
       service:
@@ -14,7 +14,7 @@ permissions:
   contents: read
 jobs:
   select:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       services: ${{ steps.select.outputs.services }}
     steps:
@@ -32,7 +32,7 @@ jobs:
           PY
   export:
     needs: select
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -51,6 +51,11 @@ jobs:
         env:
           SERVICE: ${{ matrix.service }}
         run: sudo python3 native/export_rootfs.py --service "$SERVICE" --output "$RUNNER_TEMP/mailcow-native-artifacts"
+      - name: Rehearse real DNS, systemd isolation and control peer denials
+        if: matrix.service == 'unbound-mailcow'
+        run: |
+          systemctl --version
+          sudo python3 native/rehearse_unbound.py --artifacts "$RUNNER_TEMP/mailcow-native-artifacts" --output "$RUNNER_TEMP/mailcow-native-artifacts/unbound-rehearsal.json"
       - uses: actions/upload-artifact@v4
         with:
           name: native-rootfs-${{ matrix.service }}
