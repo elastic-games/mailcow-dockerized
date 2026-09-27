@@ -16,7 +16,7 @@ CALLERS = {
     'mailcow-watchdog.service': 'watchdog',
     'mailcow-acme.service': 'acme',
     'mailcow-dovecot.service': 'dovecot',
-    'mailcow-job-dovecot_sarules.service': 'dovecot',
+    '/mailcow.slice/mailcow-jobs.slice/mailcow-job-dovecot_sarules@.service': 'dovecot',
 }
 RELOAD_TARGETS = frozenset(('nginx-mailcow', 'dovecot-mailcow', 'postfix-mailcow'))
 BROADCAST_OPERATIONS = frozenset(('exec__maildir__move', 'exec__maildir__cleanup'))

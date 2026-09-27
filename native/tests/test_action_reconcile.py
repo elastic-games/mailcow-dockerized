@@ -4,7 +4,7 @@ import sys
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from service_executor import manager_unit_absent
-from canonical_store import ClosedCgroupProbe, ACTION_CGROUP
+from canonical_store import ClosedCgroupProbe, ACTION_CGROUP, JOB_CGROUP
 
 
 class ReconcileTests(unittest.TestCase):
@@ -29,6 +29,7 @@ class ReconcileTests(unittest.TestCase):
         with self.assertRaises(ValueError): ClosedCgroupProbe([])
         probe = ClosedCgroupProbe(['/sys/fs/cgroup/system.slice/mailcow-dovecot.service'])
         self.assertIn(ACTION_CGROUP, probe.paths)
+        self.assertIn(JOB_CGROUP, probe.paths)
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)

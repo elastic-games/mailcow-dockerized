@@ -110,9 +110,10 @@ into concurrent old/new writers.
 Cutover requires a short coordinated receive/submission/admin/groupware write
 pause, queue drain or exact durable queue transfer, fresh incremental mail and
 SQL/state sync, exclusive writer ownership and count/flag/hash validation.
-After new mail/calendar/admin writes, rollback must sync those writes and queue
-state back before restoring old listeners; a stale-store rollback is forbidden.
-Keep immutable old images, their state and verified backup retrieval until this
+After new mail/calendar/admin writes, rollback starts the compatible old
+runtime against the SAME current canonical store and queues. Native and legacy
+are mutually exclusive writers; restoring a stale copied volume is forbidden.
+Keep immutable old images and verified off-host backup retrieval until this
 procedure has a successful rehearsal. Both explicitly authorized inbound and
 outbound delivery and the complete P5 parity checklist remain required.
 
@@ -120,6 +121,34 @@ Packaging references:
 [Skopeo copy and digest preservation](https://github.com/podman-container-tools/skopeo/blob/main/docs/skopeo-copy.1.md),
 [umoci unpack](https://umoci.cyphar.com/quick-start/),
 [systemd execution roots and isolation](https://www.freedesktop.org/software/systemd/man/systemd.exec.html).
+
+## Current control and scheduler source
+
+The closed executor, direct HTTP-over-Unix caller adapters, anonymous result
+spool, root foreground lease/log wrapper, Maildir transaction journal and
+authenticated replica ledger now have scoped off-host Linux execution proofs.
+CI 36348132016 at c53c4b27 passes actual packaged Dovecot Sieve/FTS/ACL actions,
+Maildir move/cleanup, kernel caller denials, nonroot capability/group/control-fd
+isolation, 100-MiB result spooling, 65-second operation lifetime and a surviving
+action after controller death blocking a generation change. This is a scoped
+runtime proof, not 18-service/groupware/scanner or live mail acceptance.
+
+The Alpine musl root lacks a libc renameat2 symbol. Maildir moves preserve the
+same atomic kernel RENAME_NOREPLACE operation using a checked Linux native
+amd64 syscall fallback; other unreviewed ABIs fail before mutation. The actual
+musl fixture verifies existing destination rejection and preserved source inode.
+
+`job_policy.py` validates all 14 original Ofelia command/schedule/overlap rows.
+Fixed trusted shell snippets preserve MASTER/gosu/source_env behavior and
+accounts; no HTTP input can select a script or unit. Three jobs prevent overlap
+with fixed service units; eleven use root-only UUID template starts. Each job
+holds the canonical generation lease and runs within fixed mailcow-jobs.slice,
+which the independent writer probe includes after a controller crash. Only
+registered SA-rule instances may request Rspamd restart through the UDS API.
+Rendering requires an explicit verified IANA timezone for calendar jobs; the
+operator must not inherit an unrelated host timezone. Rendering does not
+install or activate timers. Packaged job, DST, overlap and queued-generation
+proofs remain gates alongside complete configuration/network/lifecycle wiring.
 
 
 Manager review follow-up: Dovecot positional script/mailbox values use `--`.
