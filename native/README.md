@@ -136,3 +136,55 @@ helpers as mysql, password helper as _rspamd, df as nobody.
 `O_DIRECTORY|O_NOFOLLOW`; real filesystem tests reject root/domain/user symlink
 escapes and traversal. The future journalled mover must retain descriptors and
 use no-replace rename primitives plus reversible store/index transactions.
+
+## Isolation rehearsal and target compatibility
+
+The target reports Ubuntu 26.04 / systemd 259.5. Off-host daemon rehearsals use
+`ubuntu-26.04` and require systemd >=259 rather than claiming older-runner parity.
+`rehearse_unbound.py` starts the actual pinned daemon on private loopback port53,
+drops to its packaged UID100, and probes a synthetic DNS response. Its exact
+capability profile is SETUID/SETGID/NET_BIND_SERVICE; no NET_ADMIN, SYS_ADMIN,
+SYS_PTRACE or SYS_CHROOT. AF_NETLINK remains available for getifaddrs interface
+observation, with network administration denied by the capability profile.
+
+RootDirectory alone is not accepted as a security boundary. The rehearsal uses
+private mount/PID/network/user namespaces, full UID/GID identity mapping,
+read-only root/configuration, private devices, restricted kernel/cgroup access,
+no new privileges, bounded resources and denied mount/namespace syscalls.
+PrivateUsers=full isolates capabilities while preserving numeric ownership;
+it does **not** isolate identical host UIDs or remove the need for path/socket
+isolation. The test attempts chroot and /proc/*/root host-marker escapes,
+checks inaccessible host control paths, and exercises setgroups/setuid5000
+writing only a deliberately bound synthetic mailstore. These are requirements,
+not passed claims until the Linux CI receipt reports success.
+
+Read-only bind mounts do not stop AF_UNIX connections. `peer_policy.py` obtains
+a peer pidfd from the kernel socket (Linux SO_PEERPIDFD), checks liveness and
+SO_PEERCRED, then resolves the exact host cgroup/unit against an operator-owned
+allowlist. The rehearsal deliberately exposes the same read-only socket to two
+UID0 services: one registered unit must succeed, the other must be denied.
+The production controller must also bind each registered service to its exact
+operation families, forbid cgroup delegation, and recheck authorization per
+request. No host system bus/Docker/control sockets enter application root trees.
+
+This Unbound profile is not yet acceptance for Postfix/Dovecot supervisors,
+which may need chroot/ownership/capability transitions, or privileged netfilter.
+Each requires the same denial probes under its **actual needed** capabilities
+and writable store mounts, plus full function tests. Prefer split root-owned
+oneshot initialization and reduced-privilege foreground daemons where that
+preserves upstream behavior. Do not grant SYS_ADMIN to make bootstrap scripts
+work. Keep firewall changes in a separate typed host helper rather than granting
+host network administration to a mail application's root process.
+
+Networking must preserve separate legacy service address/listener boundaries.
+Use distinct persistent service network namespaces connected to an isolated
+mail bridge, with explicit aliases/resolver configuration. Sharing one network
+namespace among all wildcard listeners requires complete collision/address
+analysis first and is not the current acceptance design. Rehearsal bridge has
+no external interface/routes. Production egress/ingress, DNSSEC/DNSBL and SMTP
+source address behavior need explicit fixed firewall/route tests.
+
+Primary references for the reviewed target options:
+[systemd v259 exec specification](https://raw.githubusercontent.com/systemd/systemd/v259/man/systemd.exec.xml),
+[Linux peer pidfd socket UAPI](https://raw.githubusercontent.com/torvalds/linux/v6.17/include/uapi/asm-generic/socket.h),
+[GitHub runner image versions](https://github.com/actions/runner-images).
