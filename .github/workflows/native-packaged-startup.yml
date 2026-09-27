@@ -1,6 +1,9 @@
 name: Native Mail Packaged Startup Rehearsal
 on:
   workflow_dispatch:
+  push:
+    branches: [elastic/native-runtime-2026-09-27]
+    paths: [.github/workflows/native-packaged-startup.yml]
 permissions:
   contents: read
   actions: read
