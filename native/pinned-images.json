@@ -1,0 +1,110 @@
+[
+  {
+    "service": "sogo-mailcow",
+    "image": "ghcr.io/mailcow/sogo@sha256:7c1782de5f1eb47c363462fb0ae370ce56b880cbe90c541a6873856d3e135e4c",
+    "sourceTag": "ghcr.io/mailcow/sogo:5.12.10-1",
+    "unpackedBytes": 702897889
+  },
+  {
+    "service": "watchdog-mailcow",
+    "image": "ghcr.io/mailcow/watchdog@sha256:5436050d566d972cb157225f8a2b5c828c6bb188118f3bcab94dd8db065892c7",
+    "sourceTag": "ghcr.io/mailcow/watchdog:2.11",
+    "unpackedBytes": 172546487
+  },
+  {
+    "service": "acme-mailcow",
+    "image": "ghcr.io/mailcow/acme@sha256:ebbd0e6a7d5313189f847d0d6219507a693f6d77d257c1671ebab9656680a5ba",
+    "sourceTag": "ghcr.io/mailcow/acme:1.98",
+    "unpackedBytes": 171474921
+  },
+  {
+    "service": "nginx-mailcow",
+    "image": "ghcr.io/mailcow/nginx@sha256:174ddadb06957319f24d1467d6eeaae4edf547ad2c30ffc8d3866cbf99a6fce7",
+    "sourceTag": "ghcr.io/mailcow/nginx:1.30.4-1",
+    "unpackedBytes": 172108906
+  },
+  {
+    "service": "rspamd-mailcow",
+    "image": "ghcr.io/mailcow/rspamd@sha256:eebf09b0f0eb87b3bf968fabe39a095b111e85e801cade6074a97ca21b53d3a5",
+    "sourceTag": "ghcr.io/mailcow/rspamd:4.1.4-1",
+    "unpackedBytes": 295250913
+  },
+  {
+    "service": "ofelia-mailcow",
+    "image": "mcuadros/ofelia@sha256:efcbe2c5cf658a25de6443c1462d653f9cc03791d642e01fc6c638a00f97e492",
+    "sourceTag": "mcuadros/ofelia:latest",
+    "unpackedBytes": 39272360
+  },
+  {
+    "service": "php-fpm-mailcow",
+    "image": "ghcr.io/mailcow/phpfpm@sha256:0a8679cc8bab04262cfb399fc0b4608658d3db0c0c9a42087b0acd601dd66679",
+    "sourceTag": "ghcr.io/mailcow/phpfpm:8.2.29-3",
+    "unpackedBytes": 383054835
+  },
+  {
+    "service": "dovecot-mailcow",
+    "image": "ghcr.io/mailcow/dovecot@sha256:4b351795c1e08f52c6ea5de23054fb7ff94d144ff3263821178cc4f883b6f0e1",
+    "sourceTag": "ghcr.io/mailcow/dovecot:2.3.21.1-2",
+    "unpackedBytes": 501815778
+  },
+  {
+    "service": "postfix-mailcow",
+    "image": "ghcr.io/mailcow/postfix@sha256:f3b704269c38583a2c5cba30fc57e76d1d108abed22b647b91f240e96d8a126c",
+    "sourceTag": "ghcr.io/mailcow/postfix:3.10.12-1",
+    "unpackedBytes": 490645601
+  },
+  {
+    "service": "mysql-mailcow",
+    "image": "mariadb@sha256:07c0aaff7396b74cb7975cba78257178d188e30f531a5db2b617c48beef13c41",
+    "sourceTag": "mariadb:10.11",
+    "unpackedBytes": 465797155
+  },
+  {
+    "service": "redis-mailcow",
+    "image": "redis@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+    "sourceTag": "redis:7.4.10-alpine",
+    "unpackedBytes": 57327139
+  },
+  {
+    "service": "clamd-mailcow",
+    "image": "ghcr.io/mailcow/clamd@sha256:0d512b3a179c5f97e6f3132d1f88d9ec72c456fc6f7ba32a664ed4327fbd1436",
+    "sourceTag": "ghcr.io/mailcow/clamd:1.4.6-1",
+    "unpackedBytes": 172318352
+  },
+  {
+    "service": "postfix-tlspol-mailcow",
+    "image": "ghcr.io/mailcow/postfix-tlspol@sha256:44d2b3fb5a1fa8be7741e27cd468bcfaeff3c8820f89db1f5d4a6e9f6f872280",
+    "sourceTag": "ghcr.io/mailcow/postfix-tlspol:1.8.23",
+    "unpackedBytes": 299783414
+  },
+  {
+    "service": "unbound-mailcow",
+    "image": "ghcr.io/mailcow/unbound@sha256:098816f26207927e798bd55acf54a2cffed1f420b839a429089a65929c4464b0",
+    "sourceTag": "ghcr.io/mailcow/unbound:1.25.1-1",
+    "unpackedBytes": 139375382
+  },
+  {
+    "service": "netfilter-mailcow",
+    "image": "ghcr.io/mailcow/netfilter@sha256:a6c7f44c10c5edf01afa1bb155d1d42e2b04f81284a738a2d5643c834c33a143",
+    "sourceTag": "ghcr.io/mailcow/netfilter:1.64",
+    "unpackedBytes": 172123907
+  },
+  {
+    "service": "dockerapi-mailcow",
+    "image": "ghcr.io/mailcow/dockerapi@sha256:90d6f26eb3fb8a47696d8719b71e9159849d5b49e4ce3e48967f2dfb5a8df55a",
+    "sourceTag": "ghcr.io/mailcow/dockerapi:2.12",
+    "unpackedBytes": 184603831
+  },
+  {
+    "service": "memcached-mailcow",
+    "image": "memcached@sha256:c29847751abb41f4c268c84fb3087fee05d4edcbda44409ccb5086e26148e8a7",
+    "sourceTag": "memcached:alpine",
+    "unpackedBytes": 19838106
+  },
+  {
+    "service": "olefy-mailcow",
+    "image": "ghcr.io/mailcow/olefy@sha256:cec980cddf162594f5f1a7b575ae95c0f17f0c42febcfac94a478eca2d2bfd9e",
+    "sourceTag": "ghcr.io/mailcow/olefy:1.15",
+    "unpackedBytes": 176175455
+  }
+]
