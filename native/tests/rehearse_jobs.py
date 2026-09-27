@@ -78,6 +78,10 @@ def rehearse_jobs(profiles, store, scratch, adapter):
         while status(names[2]) in ('active', 'activating'):
             if time.monotonic() > deadline: raise TimeoutError('Literal fixture did not finish')
             time.sleep(.1)
+        literal_code = run(['/usr/bin/systemctl', 'show', '--property=ExecMainStatus', '--value', names[2]], capture_output=True, text=True).stdout.strip()
+        if literal_code != '0' or not (mail / 'literal-fixture').exists():
+            diagnostic = run(['/usr/bin/journalctl', '--no-pager', '-u', names[2], '-n', '15'], capture_output=True, text=True).stdout
+            raise RuntimeError('Synthetic literal child status ' + literal_code + ': ' + diagnostic[-4096:])
         assert (mail / 'literal-fixture').read_text() == 'fixture:100%literal\n'
         run(['/usr/bin/systemctl', 'start', '--no-block', names[0]])
         deadline = time.monotonic() + 10
