@@ -97,7 +97,8 @@ def rehearse(artifacts, output):
         for service in units:
             unit = UNITS[service]; path = Path('/run/systemd/system') / unit
             if path.exists(): raise FileExistsError('Existing target fixture unit refused')
-            path.write_text(render(service, profiles[unit], images[service], compose[service]))
+            path.write_text(render(service, profiles[unit], images[service], compose[service],
+                                   {'TZ': prepared['syntheticTimezone']}))
             installed.append((unit, path))
         stage = 'verify packaged units'
         run(['systemd-analyze', 'verify', *[str(path) for _, path in installed]])

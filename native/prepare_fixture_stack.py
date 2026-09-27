@@ -247,7 +247,7 @@ def prepare(artifacts, destination):
     (release / 'native-overlay.json').write_text(json.dumps(overlay, indent=2)+'\n')
     config_path = operator / 'runtime.json'; config_path.write_text(json.dumps(config, indent=2)+'\n'); config_path.chmod(0o600)
     (operator / 'image-metadata.json').write_text(json.dumps(images, indent=2)+'\n'); (operator / 'image-metadata.json').chmod(0o600)
-    receipt = {'prepared18ExactRootTrees': True, 'noProductionDataOrOutbound': True,
+    receipt = {'prepared18ExactRootTrees': True, 'syntheticTimezone': variables['TZ'], 'noProductionDataOrOutbound': True,
                'bootstrapsActivated': False, 'fullStackParity': False,
                'missingPublicGeneratedAssetTemplates': sorted(missing_public),
                'initiallyEmptyMutableStateDirs': sorted(empty_generated_dirs),

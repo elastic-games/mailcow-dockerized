@@ -40,13 +40,16 @@ class StackPreparationTests(unittest.TestCase):
             self.assertEqual(profile.account('11211'), ('11211', '11211', '2222,11211'))
             unit = render('memcached-mailcow', profile,
                           {'imageUser':'11211', 'workingDirectory':'/', 'entrypoint':['memcached'], 'command':[]},
-                          {'entrypointTemplate':None, 'commandTemplate':None})
+                          {})
             self.assertIn('"--uid" "11211" "--gid" "11211" "--groups" "2222,11211"', unit)
 
     def test_exact_compose_defaults_and_literal_unit_arguments(self):
         values = environment_rows({'environment': ['A=${A:-fallback}', 'B=${B-default}', 'EMPTY=${EMPTY}', 'PORT=9000']}, {'A':'', 'B':''})
         self.assertEqual(values, {'A':'fallback', 'B':'', 'EMPTY':'', 'PORT':'9000'})
-        self.assertEqual(command({'entrypoint':['entry'], 'command':['original']}, {'entrypointTemplate':None,'commandTemplate':'one "two words"'}), ['entry','one','two words'])
+        self.assertEqual(command({'entrypoint':['entry'], 'command':['original']}, {'command':'one "two words"'}), ['entry','one','two words'])
+        self.assertEqual(command({'entrypoint':['entry'], 'command':[]}, {'command':'php-fpm -d date.timezone=${TZ}'}, {'TZ':'America/New_York'}),
+                         ['entry','php-fpm','-d','date.timezone=America/New_York'])
+        with self.assertRaises(ValueError): command({'entrypoint':['entry'], 'command':[]}, {'command':'${TZ}'})
         self.assertEqual(quote('$MASTER 100%'), '"$$MASTER 100%%"')
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'environment'
