@@ -15,7 +15,7 @@ import tempfile
 
 PINS = Path(__file__).with_name('pinned-images.json')
 PROBES = {
-    'unbound-mailcow': ['/usr/sbin/unbound', '-V'], 'dovecot-mailcow': ['/usr/sbin/dovecot', '--version'],
+    'unbound-mailcow': ['/usr/sbin/unbound', '-V'], 'dovecot-mailcow': ['/usr/sbin/dovecot', '-c', '/dev/null', '--version'],
     'postfix-mailcow': ['/usr/sbin/postconf', '-h', 'mail_version'], 'rspamd-mailcow': ['/usr/bin/rspamd', '--version'],
     'nginx-mailcow': ['/usr/sbin/nginx', '-v'], 'clamd-mailcow': ['/usr/sbin/clamd', '--version'],
     'redis-mailcow': ['/usr/local/bin/redis-server', '--version'], 'mysql-mailcow': ['/usr/bin/mariadb', '--version'],
@@ -59,7 +59,18 @@ def export(service, output):
         if probe:
             # Isolated PID/mount/network; versions/help/import only. No daemon
             # listener, mail writer, scheduler, production state or public route.
-            checked = run(['unshare', '--mount', '--net', '--pid', '--fork', 'chroot', str(root), *probe], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            # OCI images receive /dev from the runtime, not image layers. Supply
+            # only minimal private devices, never a host /dev bind, for probes.
+            bootstrap = ('import os,stat,subprocess,sys; root=sys.argv[1]; '
+                         'subprocess.run(["mount","-t","tmpfs","-o","mode=755","tmpfs",root+"/dev"],check=True); '
+                         '[(os.mknod(root+"/dev/"+name,stat.S_IFCHR|0o666,os.makedev(1,minor))) '
+                         'for name,minor in (("null",3),("zero",5),("random",8),("urandom",9))]; '
+                         'os.chroot(root);os.chdir("/");os.execv(sys.argv[2],sys.argv[2:])')
+            try:
+                checked = run(['unshare', '--mount', '--net', '--pid', '--fork', '/usr/bin/python3', '-c', bootstrap,
+                               str(root), *probe], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError as error:
+                raise RuntimeError('Isolated public-image probe failed: '+error.stdout.decode(errors='replace')[:2000]) from None
             receipt['probePassed'] = True
             receipt['probeOutput'] = checked.stdout.decode(errors='replace')[:2000]
         # Numeric IDs, modes, xattrs, hardlinks/ACLs and sparse files retained.
