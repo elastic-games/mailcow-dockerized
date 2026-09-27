@@ -38,6 +38,7 @@ class Plan:
     primitive: str
     argv: tuple[str, ...] = ()
     fields: tuple[tuple[str, Any], ...] = ()
+    user: str = 'root'
 
 
 def text(value, name, limit=1024):
@@ -77,12 +78,12 @@ def compile_action(service, action, request):
         raise PolicyError('Action target mismatch')
     if cmd == 'mailq':
         fixed = {'list': ('/usr/sbin/postqueue', '-j'), 'flush': ('/usr/sbin/postqueue', '-f'), 'super_delete': ('/usr/sbin/postsuper', '-d', 'ALL')}
-        if task in fixed: return Plan(operation, unit, 'argv', fixed[task])
+        if task in fixed: return Plan(operation, unit, 'argv', fixed[task], user='root' if task == 'super_delete' else 'postfix')
         items = request.get('items')
         if not isinstance(items, list) or not 1 <= len(items) <= 1000 or any(not isinstance(item, str) or not re.fullmatch('[0-9a-fA-F]+', item) or len(item) > 64 for item in items):
             raise PolicyError('Invalid queue IDs')
-        if task == 'cat': return Plan(operation, unit, 'argv', ('/usr/sbin/postcat', '-q', *items))
-        if task == 'deliver': return Plan(operation, unit, 'queue-delivery-batch', fields=(('items', tuple(items)),))
+        if task == 'cat': return Plan(operation, unit, 'argv', ('/usr/sbin/postcat', '-q', *items), user='postfix')
+        if task == 'deliver': return Plan(operation, unit, 'queue-delivery-batch', fields=(('items', tuple(items)),), user='postfix')
         flag = {'delete': '-d', 'hold': '-h', 'unhold': '-H'}[task]
         return Plan(operation, unit, 'argv', ('/usr/sbin/postsuper', *(item for queue_id in items for item in (flag, queue_id))))
     if cmd == 'reload': return Plan(operation, unit, 'unit-control', ('/usr/bin/systemctl', 'reload', '--', unit))
@@ -92,34 +93,34 @@ def compile_action(service, action, request):
             if 'username' in request: argv += ('-u', text(request['username'], 'username'))
             elif 'all' in request: argv += ('-A',)
             else: raise PolicyError('Missing rescan scope')
-            return Plan(operation, unit, 'argv', argv)
+            return Plan(operation, unit, 'argv', argv, user='vmail')
         if task == 'df':
             directory = text(request.get('dir'), 'disk path')
             if directory not in ('/var/vmail', '/var/vmail_index', '/var/lib/mysql', '/var/spool/postfix'):
                 raise PolicyError('Disk path outside mail state')
-            return Plan(operation, unit, 'disk-observation', ('/bin/df', '-H', '--', directory))
+            return Plan(operation, unit, 'disk-observation', ('/bin/df', '-H', '--', directory), user='nobody')
         # Root-only helpers use local MariaDB Unix socket/defaults-file. No DBROOT
         # password travels in argv, request, Redis message or generated plan.
-        return Plan(operation, unit, 'database-maintenance', fields=(('task', task),))
+        return Plan(operation, unit, 'database-maintenance', fields=(('task', task),), user='mysql')
     if cmd == 'sieve':
         argv = ('/usr/bin/doveadm', 'sieve', 'list' if task == 'list' else 'get', '-u', text(request.get('username'), 'username'))
-        if task == 'print': argv += (text(request.get('script_name'), 'Sieve script'),)
+        if task == 'print': argv += ('--', text(request.get('script_name'), 'Sieve script'))
         return Plan(operation, unit, 'argv', argv)
     if cmd == 'maildir':
         if task == 'cleanup': fields = (('maildir', maildir(request.get('maildir'))),)
         else: fields = (('old_maildir', maildir(request.get('old_maildir'))), ('new_maildir', maildir(request.get('new_maildir'))))
-        return Plan(operation, unit, 'maildir-transaction', fields=fields)
+        return Plan(operation, unit, 'maildir-transaction', fields=fields, user='vmail')
     if cmd == 'rspamd':
         # Secret belongs in an in-memory/stdin envelope, never printable Plan.
         raw = text(request.get('raw'), 'Rspamd controller secret', 4096)
-        return Plan(operation, unit, 'rspamd-controller-password', fields=(('secretProvided', bool(raw)),))
+        return Plan(operation, unit, 'rspamd-controller-password', fields=(('secretProvided', bool(raw)),), user='_rspamd')
     if cmd == 'sogo':
-        return Plan(operation, unit, 'argv', ('/usr/sbin/sogo-tool', 'rename-user', text(request.get('old_username'), 'old username'), text(request.get('new_username'), 'new username')))
+        return Plan(operation, unit, 'argv', ('/usr/sbin/sogo-tool', 'rename-user', text(request.get('old_username'), 'old username'), text(request.get('new_username'), 'new username')), user='sogo')
     if cmd == 'doveadm':
         if task == 'get_acl':
             return Plan(operation, unit, 'acl-inventory', fields=(('id', text(request.get('id'), 'ACL identity')),))
         user, mailbox, identity = (text(request.get(field), field) for field in ('user', 'mailbox', 'id'))
-        argv = ('/usr/bin/doveadm', 'acl', 'delete' if task == 'delete_acl' else 'set', '-u', user, mailbox, 'user=' + identity)
+        argv = ('/usr/bin/doveadm', 'acl', 'delete' if task == 'delete_acl' else 'set', '-u', user, '--', mailbox, 'user=' + identity)
         if task == 'set_acl':
             rights = request.get('rights')
             if not isinstance(rights, list) or not rights or any(not isinstance(right, str) or right.lower() not in RIGHTS for right in rights):

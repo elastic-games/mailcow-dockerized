@@ -48,6 +48,19 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(plan, policy.compile_action('rspamd-mailcow','exec', request))
         with self.assertRaises(policy.PolicyError): policy.compile_pubsub({'api_call':'exec','container_name':'rspamd-mailcow','request':request})
 
+    def test_option_values_and_service_user_context(self):
+        sieve = policy.compile_action('dovecot-mailcow','exec', {'cmd':'sieve','task':'print','username':'-fixture@example.test','script_name':'-A'})
+        self.assertEqual(sieve.argv[-2:], ('--', '-A'))
+        acl = policy.compile_action('dovecot-mailcow','exec', {'cmd':'doveadm','task':'set_acl','user':'-fixture@example.test','mailbox':'-A','id':'-peer@example.test','rights':['read']})
+        self.assertEqual(acl.argv[5:7], ('--', '-A'))
+        rename = policy.compile_action('sogo-mailcow','exec', {'cmd':'sogo','task':'rename_user','old_username':'-old@example.test','new_username':'-new@example.test'})
+        self.assertEqual(rename.argv[-2:], ('-old@example.test','-new@example.test'))
+        self.assertEqual(rename.user,'sogo')
+        for task in ('cat','list','flush','deliver'):
+            plan = policy.compile_action('postfix-mailcow','exec', {'cmd':'mailq','task':task,'items':['AB']})
+            self.assertEqual(plan.user,'postfix')
+        self.assertEqual(policy.compile_action('postfix-mailcow','exec', {'cmd':'mailq','task':'delete','items':['AB']}).user,'root')
+
     def test_complete_operation_examples_compile(self):
         examples = {
             'mailq': ('postfix', {'items':['AB']}), 'system': ('dovecot', {'username':'fixture@example.test','dir':'/var/vmail'}),

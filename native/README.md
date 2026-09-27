@@ -88,7 +88,7 @@ from documentation. This reconciles the earlier “30 operations” count.
 The policy binds each exec family to the exact mail service; unit names and
 executables are fixed, scalar inputs stay argv entries, queue IDs and ACL rights
 are validated, maildir/disk paths are restricted, and controller secrets never
-appear in printable plans. HTTP and MC_CHANNEL share the compiler. Six tests
+appear in printable plans. HTTP and MC_CHANNEL share the compiler. Eight tests
 verify complete operation coverage and command/service/path injection denials.
 
 The compiler is a reviewable boundary, **not an activated executor**. Remaining
@@ -120,3 +120,19 @@ Packaging references:
 [Skopeo copy and digest preservation](https://github.com/podman-container-tools/skopeo/blob/main/docs/skopeo-copy.1.md),
 [umoci unpack](https://umoci.cyphar.com/quick-start/),
 [systemd execution roots and isolation](https://www.freedesktop.org/software/systemd/man/systemd.exec.html).
+
+
+Manager review follow-up: Dovecot positional script/mailbox values use `--`.
+The actual deployed 2.3.21.1 Sieve parser was tested read-only with `/dev/null`
+configuration and a synthetic nonexistent account: `-- -A` reaches user lookup
+(exit67) rather than option parsing, while an unknown option exits64. SOGo
+5.12.10 source parses flags only before fixed `rename-user`; its operation
+consumes exactly two positional strings, so adding `--` there would break names.
+Hyphen-leading names remain literal. Plans retain upstream execution users:
+postcat/postqueue as postfix, SOGo rename as sogo, FTS/maildir as vmail, database
+helpers as mysql, password helper as _rspamd, df as nobody.
+
+`rooted_paths.py` opens the state root and every child with descriptor-relative
+`O_DIRECTORY|O_NOFOLLOW`; real filesystem tests reject root/domain/user symlink
+escapes and traversal. The future journalled mover must retain descriptors and
+use no-replace rename primitives plus reversible store/index transactions.
