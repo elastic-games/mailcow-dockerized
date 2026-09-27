@@ -19,7 +19,7 @@ from control_protocol import Dispatcher
 from control_server import ControlServer
 from rehearse_unbound import run, validate
 from rehearse_dovecot import mail_probe
-from service_executor import Profile, Executor, bounded
+from service_executor import Profile, Executor, bounded, manager_unit_absent
 from service_observer import Observer
 from result_spool import SpoolBudget
 from replication_auth import ReplicaAuth, canonical
@@ -197,10 +197,11 @@ with CanonicalStore(sys.argv[2]).lease('native'):
             controller = subprocess.Popen(['/usr/bin/python3', '-c', controller_code, str(helpers), str(canonical_root)], stdout=subprocess.PIPE)
             assert controller.stdout.readline().strip() == b'ready'
             controller.kill(); controller.wait(timeout=5)
-            try: store.activate('legacy', ClosedCgroupProbe([]))
+            try: store.activate('legacy', ClosedCgroupProbe(['/sys/fs/cgroup/system.slice/mailcow-dovecot.service']))
             except StoreBusy: pass
             else: raise AssertionError('Surviving action after controller death allowed switch')
             run(['/usr/bin/systemctl', 'stop', '--', 'mailcow-action-crash-fixture.service'])
+            assert manager_unit_absent('mailcow-action-already-collected-fixture.service')
             # Slow supervised command exceeds old PHP60s wait without killing
             # valid work; wrapper reopens /dev/stdout and holds writer lease.
             slow = unit_command('mailcow-slow-fixture.service', ['/run/mailcow-log-pipe', '--lease-dir', '/run/mailcow-lease', '--generation', 'native', '--',

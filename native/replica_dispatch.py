@@ -59,8 +59,18 @@ class ReplicaDispatch:
             raise RuntimeError('Replica action needs journal recovery')
         # Keep replay id after completion; root operator may prune records older
         # than authenticated expiry only after confirming no uncertain action.
-        fd = os.open(self.ledger / name, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
-        with os.fdopen(fd, 'wb') as file: file.write(canonical({'nonce': nonce, 'issued': message['native_auth']['issued'], 'complete': True})); file.flush(); os.fsync(file.fileno())
+        import tempfile
+        with self.lock:
+            fd, temp = tempfile.mkstemp(dir=self.ledger, prefix='.completion-')
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, 'wb') as file: file.write(canonical({'nonce': nonce, 'issued': message['native_auth']['issued'], 'complete': True})); file.flush(); os.fsync(file.fileno())
+                os.replace(temp, self.ledger / name)
+                directory = os.open(self.ledger, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try: os.fsync(directory)
+                finally: os.close(directory)
+            finally:
+                if os.path.exists(temp): os.unlink(temp)
         return True
 
     def broadcast(self, plan, base):

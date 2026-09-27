@@ -26,6 +26,28 @@ CAPS = {'mailcow-unbound.service': ('SETUID', 'SETGID'),
         'mailcow-postfix.service': MASTER_CAPS, 'mailcow-dovecot.service': MASTER_CAPS}
 
 
+def manager_unit_absent(unit, runner=None):
+    """Confirm manager reachable, no active unit and no pending job.
+
+    systemctl's --output=json changes journal output, not list-units/list-jobs.
+    Use the documented typed Manager D-Bus arrays via busctl JSON instead.
+    Never treat an error string or missing cgroup alone as manager proof.
+    """
+    runner = runner or bounded
+    base = ['/usr/bin/busctl', '--json=short', 'call', 'org.freedesktop.systemd1', '/org/freedesktop/systemd1', 'org.freedesktop.systemd1.Manager']
+    for method, signature, width, index in (('ListUnits', 'a(ssssssouso)', 10, 0), ('ListJobs', 'a(usssoo)', 6, 1)):
+        code, output = runner([*base, method], timeout=8)
+        if code: return False
+        response = json.loads(output)
+        if response.get('type') != signature or not isinstance(response.get('data'), list) or len(response['data']) != 1 or not isinstance(response['data'][0], list):
+            raise ValueError('Unexpected manager schema')
+        for row in response['data'][0]:
+            if not isinstance(row, list) or len(row) != width: raise ValueError('Unexpected manager row')
+            if row[index] == unit:
+                if method == 'ListJobs' or row[3] not in ('inactive', 'failed') or row[7] != 0: return False
+    return True
+
+
 def bounded(argv, data=b'', timeout=60, spool=None):
     """Capture bounded output; never echo argv/input on failure."""
     with subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -88,6 +110,9 @@ class Profile:
                       'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK',
                       'SystemCallFilter=~mount umount2 pivot_root move_mount open_tree fsopen fsconfig fsmount mount_setattr @module @reboot @swap @raw-io',
                       'SystemCallErrorNumber=EPERM', 'CapabilityBoundingSet=' + ' '.join('CAP_' + cap for cap in CAPS.get(self.unit, ()) if user == 'root'),
+                      # Foreground lease/log wrapper execs the packaged daemon;
+                      # required capabilities must survive that extra exec.
+                      'AmbientCapabilities=' + ' '.join('CAP_' + cap for cap in CAPS.get(self.unit, ()) if user == 'root'),
                       'TemporaryFileSystem=/run /tmp', 'KillMode=control-group']
         for field, bindings in (('BindReadOnlyPaths', self.readonly), ('BindPaths', self.writable)):
             for source, destination in bindings:
@@ -122,17 +147,16 @@ class Executor:
                 # Retain lease through stop AND verified absence. Unobservable
                 # systemd state or an uninterruptible task must stay blocking.
                 group = Path('/sys/fs/cgroup/mailcow.slice/mailcow-actions.slice') / action_unit
+                pause = 1
                 while True:
                     try:
                         bounded(['/usr/bin/systemctl', 'kill', '--kill-whom=all', '--signal=KILL', '--', action_unit], timeout=8)
                         bounded(['/usr/bin/systemctl', 'stop', '--no-block', '--', action_unit], timeout=8)
-                        code, output = bounded(['/usr/bin/systemctl', 'show', '--property=ActiveState,Job', '--', action_unit], timeout=8)
-                        fields = dict(line.split('=', 1) for line in output.decode().splitlines() if '=' in line)
                         try: populated = dict(line.split() for line in (group / 'cgroup.events').read_text().splitlines()).get('populated') != '0'
                         except FileNotFoundError: populated = False
-                        if code == 0 and fields.get('ActiveState') in ('inactive', 'failed') and fields.get('Job') in ('0', '') and not populated: break
+                        if not populated and manager_unit_absent(action_unit): break
                     except (OSError, ValueError, TimeoutError): pass
-                    time.sleep(.1)
+                    time.sleep(pause); pause = min(30, pause * 2)
                 if spool: spool.close()
                 raise
 

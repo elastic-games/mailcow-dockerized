@@ -132,6 +132,7 @@ class ClosedCgroupProbe:
     process can bypass these primitives; application units cannot access .control.
     """
     def __init__(self,paths):
+        if not paths:raise ValueError('Registered daemon cgroup inventory required')
         self.paths=tuple(dict.fromkeys([*(Path(path) for path in paths),ACTION_CGROUP]))
         if any((path!=ACTION_CGROUP and not str(path).startswith('/sys/fs/cgroup/system.slice/')) or '..' in path.parts for path in self.paths):
             raise ValueError('Closed systemd cgroup paths required')
