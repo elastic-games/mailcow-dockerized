@@ -143,9 +143,12 @@ The target reports Ubuntu 26.04 / systemd 259.5. Off-host daemon rehearsals use
 `ubuntu-26.04` and require systemd >=259 rather than claiming older-runner parity.
 `rehearse_unbound.py` starts the actual pinned daemon on private loopback port53,
 drops to its packaged UID100, and probes a synthetic DNS response. Its exact
-capability profile is SETUID/SETGID/NET_BIND_SERVICE; no NET_ADMIN, SYS_ADMIN,
+capability profile is SETUID/SETGID; no NET_ADMIN, SYS_ADMIN,
 SYS_PTRACE or SYS_CHROOT. AF_NETLINK remains available for getifaddrs interface
 observation, with network administration denied by the capability profile.
+The host-created private service netns has ip_unprivileged_port_start=0; child
+userns capabilities cannot authorize low-port binds in its parent-owned netns.
+This per-namespace threshold preserves port53 without host bind privileges.
 
 RootDirectory alone is not accepted as a security boundary. The rehearsal uses
 private mount/PID/network/user namespaces, full UID/GID identity mapping,

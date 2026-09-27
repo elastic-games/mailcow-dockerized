@@ -91,7 +91,7 @@ def rehearse(artifacts,output):
 ''')
         properties=['RootDirectory='+str(root),'NetworkNamespacePath=/run/netns/'+namespace,
                     'BindReadOnlyPaths='+str(conf)+':/etc/unbound/unbound.conf','ProtectSystem=strict',
-                    'ProtectHome=yes','PrivateDevices=yes','NoNewPrivileges=yes','CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE',
+                    'ProtectHome=yes','PrivateDevices=yes','NoNewPrivileges=yes','CapabilityBoundingSet=CAP_SETUID CAP_SETGID',
                     'PrivateUsers=full','PrivatePIDs=yes','MountAPIVFS=yes','BindLogSockets=no',
                     'ProtectKernelTunables=yes','ProtectKernelModules=yes','ProtectKernelLogs=yes',
                     'ProtectControlGroups=strict','RestrictNamespaces=yes','RestrictSUIDSGID=yes',
@@ -101,6 +101,10 @@ def rehearse(artifacts,output):
         try:
             run(['ip','netns','add',namespace]);created=True
             run(['ip','-n',namespace,'link','set','lo','up'])
+            # This netns is owned by the initial userns: a child's bind-service
+            # capability cannot authorize its low ports. Relax privileged-port
+            # threshold only in the isolated service namespace, never the host.
+            run(['ip','netns','exec',namespace,'sysctl','-qw','net.ipv4.ip_unprivileged_port_start=0'])
             run(['systemd-run','--quiet','--unit='+unit,*['--property='+x for x in properties],
                  '/usr/sbin/unbound','-d','-c','/etc/unbound/unbound.conf']);activated=True
             # A real DNS transaction proves systemd root mount/bind/listener and
@@ -150,7 +154,7 @@ assert os.waitpid(pid,0)[1]==0
             memory=run(['systemctl','show',unit,'--property=MemoryCurrent','--value'],stdout=subprocess.PIPE).stdout.decode().strip()
             result={'passed':active=='active','service':'unbound-mailcow','sourceImage':source['sourceImage'],
                     'artifactBytes':source['artifactBytes'],'artifactSHA256':source['artifactSHA256'],
-                    'systemdVersion':version,'privateUsersFull':True,'privatePIDs':True,'capabilityProfile':['SETUID','SETGID','NET_BIND_SERVICE'],'lowPortDnsBind':True,'daemonDroppedToUid100':True,
+                    'systemdVersion':version,'privateUsersFull':True,'privatePIDs':True,'capabilityProfile':['SETUID','SETGID'],'lowPortDnsBind':True,'daemonDroppedToUid100':True,'privateNamespaceUnprivilegedPortStart':0,
                     'legacyUid5000SetuidSetgroupsWrite':True,'chrootAttemptDenied':True,'procRootHostSecretDenied':True,
                     'hostSecretDenied':True,'controlAllowedServiceAccepted':True,'controlUnallowedSameUidDenied':True,
                     'systemdRootDirectory':True,'readOnlyConfigurationBind':True,'realSyntheticDnsResponse':True,

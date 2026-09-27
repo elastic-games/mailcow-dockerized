@@ -50,11 +50,14 @@ def export(service, output):
         root = bundle/'rootfs'
         config = json.loads((bundle/'config.json').read_text())
         image_index = json.loads((layout/'index.json').read_text())
+        allocated=int(run(['du','-sx','-B1',str(root)],stdout=subprocess.PIPE).stdout.split()[0])
+        logical=int(run(['du','-sx','--apparent-size','-B1',str(root)],stdout=subprocess.PIPE).stdout.split()[0])
         probe = PROBES.get(service)
         receipt = {'service':service, 'sourceImage':row['image'], 'sourceManifestSHA256':source_digest,
                    'ociManifestDescriptors':image_index['manifests'], 'architecture':'linux/amd64',
                    'nativeArgs':config['process']['args'], 'imageEnvironmentKeys': sorted(x.split('=',1)[0] for x in config['process'].get('env',[])),
                    'sourceUser':config['process']['user'], 'sourceRootfsByteHint':row['unpackedBytes'],
+                   'rootTreeAllocatedBytes':allocated,'rootTreeLogicalBytes':logical,
                    'probe':probe, 'probePassed':False, 'probeOutput':None, 'noProductionData':True}
         if probe:
             # Isolated PID/mount/network; versions/help/import only. No daemon
