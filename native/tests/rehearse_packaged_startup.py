@@ -75,16 +75,19 @@ def rehearse(artifacts, output):
     if shutil.disk_usage('/var/lib').free < 9 * 1024**3: raise RuntimeError('Offhost fixture needs >=9GiB free')
     installed = []; started = []; controller = None; network = None; network_active = False
     base = Path(tempfile.mkdtemp(prefix='mailcow-pinned-stack-', dir='/var/lib'))
-    result = None; operation_error = None
+    result = None; operation_error = None; stage = 'preflight'
     units = ('redis-mailcow', 'mysql-mailcow', 'php-fpm-mailcow')
     try:
         for service in units: no_preexisting_unit_or_job(UNITS[service])
+        stage = 'prepare pinned roots'
         root = base / 'stack'; config_path, prepared = prepare(artifacts, root)
         config, store, profiles, _ = load(config_path)
         network = Network(config['project'], config['networkTag'], config['ipv4Network'])
         images = json.loads((store.root / 'operator/image-metadata.json').read_text())
         compose = yaml.safe_load((Path(__file__).resolve().parents[2] / 'docker-compose.yml').read_text())['services']
+        stage = 'create private network'
         network.create(); network_active = True
+        stage = 'start native controller'
         controller = subprocess.Popen([sys.executable, str(root / 'release/native/native_controller.py'), '--config', str(config_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         control = store.root / 'operator/control.sock'; deadline = time.monotonic() + 10
         while not control.exists():
@@ -96,9 +99,11 @@ def rehearse(artifacts, output):
             if path.exists(): raise FileExistsError('Existing target fixture unit refused')
             path.write_text(render(service, profiles[unit], images[service], compose[service]))
             installed.append((unit, path))
+        stage = 'verify packaged units'
         run(['systemd-analyze', 'verify', *[str(path) for _, path in installed]])
         run(['systemctl', 'daemon-reload'])
         for service in units:
+            stage = 'start and probe ' + service
             unit = UNITS[service]
             started.append(unit)
             run(['systemctl', 'start', '--no-block', unit])
@@ -117,6 +122,7 @@ def rehearse(artifacts, output):
                 def ready():
                     with socket.create_connection((network.addresses[service], 9000), timeout=.3): return True
             until(unit, ready, 90 if service != 'php-fpm-mailcow' else 180)
+        stage = 'verify synthetic MariaDB schema'
         mysql = UNITS['mysql-mailcow']
         sockets = [source / 'mysqld.sock' for source, target in profiles[mysql].writable
                    if target.rstrip('/') in ('/var/run/mysqld', '/run/mysqld')]
@@ -154,7 +160,9 @@ def rehearse(artifacts, output):
     except BaseException as cleanup_error:
         # No recursive data deletion or unit removal on uncertain state. The
         # offhost runner is ephemeral, but preserve exact evidence until exit.
-        raise RuntimeError('Synthetic packaged stack retained: cleanup requires operator review') from cleanup_error
+        original = type(operation_error).__name__ if operation_error else 'none'
+        raise RuntimeError('Synthetic packaged stack retained after ' + stage +
+                           ': original=' + original + ', cleanup=' + type(cleanup_error).__name__) from cleanup_error
     if operation_error: raise operation_error
     result['cleanupConfirmed'] = True
     output.write_text(json.dumps(result, indent=2)+'\n')

@@ -3,7 +3,13 @@ on:
   workflow_dispatch:
   push:
     branches: [elastic/native-runtime-2026-09-27]
-    paths: [.github/workflows/native-packaged-startup.yml]
+    paths:
+      - .github/workflows/native-packaged-startup.yml
+      - native/tests/rehearse_packaged_startup.py
+      - native/fixture_network.py
+      - native/prepare_fixture_stack.py
+      - native/stack_units.py
+      - native/image_metadata.py
 permissions:
   contents: read
   actions: read

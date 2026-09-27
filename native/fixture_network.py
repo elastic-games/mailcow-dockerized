@@ -98,9 +98,16 @@ class Network:
             if pids: raise RuntimeError('Active fixture process prevents network removal')
             self.run(['/usr/sbin/ip', 'netns', 'delete', namespace])
             self.created.pop()
-        for link in reversed(self.links):
-            if Path('/sys/class/net', link).exists(): self.run(['/usr/sbin/ip', 'link', 'delete', link])
-        self.links.clear()
+        while self.links:
+            link = self.links[-1]
+            if Path('/sys/class/net', link).exists():
+                try: self.run(['/usr/sbin/ip', 'link', 'delete', link])
+                except subprocess.CalledProcessError:
+                    # Namespace removal can delete the veth pair between the
+                    # existence check and ip link. Only confirmed absence is
+                    # safe to accept; retain a live link for operator review.
+                    if Path('/sys/class/net', link).exists(): raise
+            self.links.pop()
         if self.firewall_created:
             self.run(['/usr/sbin/nft', 'delete', 'table', 'inet', self.table]); self.firewall_created = False
         if self.bridge_created:
