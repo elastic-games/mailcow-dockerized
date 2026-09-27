@@ -21,7 +21,8 @@ from fixture_network import Network
 from prepare_fixture_stack import prepare
 from runtime_config import load
 from stack_units import render
-from service_executor import manager_unit_absent, ACTION_CGROUP, JOB_CGROUP
+from canonical_store import ACTION_CGROUP, JOB_CGROUP
+from service_executor import manager_unit_absent
 from redis_wire import Redis
 from runtime_config import protected_file
 
