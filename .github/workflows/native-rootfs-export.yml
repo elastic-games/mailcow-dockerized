@@ -1,0 +1,56 @@
+name: Native Mail Rootfs Export
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Pinned service name, or all for 18-service export
+        required: true
+        default: unbound-mailcow
+        type: string
+permissions:
+  contents: read
+jobs:
+  select:
+    runs-on: ubuntu-24.04
+    outputs:
+      services: ${{ steps.select.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: select
+        env:
+          REQUESTED_SERVICE: ${{ inputs.service }}
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib
+          names=[row['service'] for row in json.loads(pathlib.Path('native/pinned-images.json').read_text())]
+          chosen=os.environ['REQUESTED_SERVICE']
+          if chosen!='all' and chosen not in names:raise SystemExit('Unknown pinned service')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('services='+json.dumps(names if chosen=='all' else [chosen])+'\n')
+          PY
+  export:
+    needs: select
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        service: ${{ fromJSON(needs.select.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install off-host exporter tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends skopeo umoci
+          skopeo --version
+          umoci --version
+      - name: Export pinned upstream root tree and isolated version probe
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: sudo python3 native/export_rootfs.py --service "$SERVICE" --output "$RUNNER_TEMP/mailcow-native-artifacts"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-rootfs-${{ matrix.service }}
+          path: ${{ runner.temp }}/mailcow-native-artifacts
+          compression-level: 0
+          retention-days: 30
