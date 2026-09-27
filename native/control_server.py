@@ -6,6 +6,7 @@ an unrelated later peer. No request/header/body logging or exception repr.
 """
 import json
 import os
+import socket
 import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler
@@ -26,6 +27,17 @@ class Handler(BaseHTTPRequestHandler):
         try: self.caller = self.server.peer_authorizer(self.request, CALLERS)
         except PeerDenied:
             self.request.sendall(b'HTTP/1.0 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+            # Closing a Linux stream with an unread request can reset even a
+            # complete denial reply. Half-close response then discard only a
+            # bounded amount, without parsing or granting the peer authority.
+            self.request.shutdown(socket.SHUT_WR); self.request.settimeout(.1)
+            remaining = MAX_BODY + 8192
+            try:
+                while remaining:
+                    data = self.request.recv(min(remaining, 65536))
+                    if not data: break
+                    remaining -= len(data)
+            except (OSError, TimeoutError): pass
             return
         super().handle()
 
@@ -83,3 +95,8 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     def process_request_thread(self, request, address):
         try: super().process_request_thread(request, address)
         finally: self.slots.release()
+
+    def handle_error(self, request, address):
+        # An operation/caller may contain private fields; no traceback/context.
+        import sys
+        sys.stderr.write('native mail control connection failed\n')
