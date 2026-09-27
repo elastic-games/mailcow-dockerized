@@ -169,6 +169,24 @@ print(json.dumps({'packagedVmailIdentity':True,'effectivePermittedAmbientCapsEmp
             groups = profiles['mailcow-dovecot.service'].account('vmail')[2]
             code, identity = executor.command('mailcow-dovecot.service', ('/usr/bin/python3', '-c', identity_probe, groups), 'vmail')
             assert code == 0 and json.loads(identity)['protectedControlUnreadable']
+            rename_probe = '''import os,pathlib,sys,tempfile,json
+sys.path.insert(0,'/run/mailcow-native');from maildir_transaction import rename_no_replace
+with tempfile.TemporaryDirectory(dir='/var/vmail') as temporary:
+ root=pathlib.Path(temporary);source=root/'source';destination=root/'destination'
+ source.mkdir();destination.mkdir();(source/'arrival').write_text('synthetic')
+ inode=source.stat().st_ino;fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+ try:
+  try:rename_no_replace(fd,'source',fd,'destination')
+  except FileExistsError:pass
+  else:raise AssertionError('No-replace primitive overwrote destination')
+  assert source.stat().st_ino==inode and not list(destination.iterdir())
+  destination.rmdir();rename_no_replace(fd,'source',fd,'destination')
+  assert destination.stat().st_ino==inode and (destination/'arrival').read_text()=='synthetic'
+ finally:os.close(fd)
+print(json.dumps({'actualPackagedLibcNoReplacePassed':True}))
+'''
+            code, renamed = executor.command('mailcow-dovecot.service', ('/usr/bin/python3', '-c', rename_probe), 'vmail')
+            assert code == 0 and json.loads(renamed)['actualPackagedLibcNoReplacePassed']
             properties = profiles['mailcow-dovecot.service'].properties()
             run(['/usr/bin/systemd-run', '--quiet', '--unit=mailcow-dovecot.service', *['--property=' + prop for prop in properties],
                  '--', '/run/mailcow-log-pipe', '--lease-dir', '/run/mailcow-lease', '--generation', 'native', '--', '/usr/sbin/dovecot', '-F'])
@@ -254,6 +272,7 @@ with CanonicalStore(sys.argv[2]).lease('native'):
                        'killedControllerSurvivingActionBlockedTransition': True,
                        'nonrootChildCapsEmptyAndGroupsPreserved': True,
                        'droppedChildCannotReadOrInheritControl': True,
+                       'packagedMuslNoReplaceDestinationExistsSourcePreserved': True,
                        'devStdoutReopenPreserved': True, 'noProductionDataOrOutbound': True}
         finally:
             # Fresh disposable CI units only: logs contain synthetic fixtures,
