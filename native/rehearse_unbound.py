@@ -95,7 +95,7 @@ def rehearse(artifacts,output):
                     'PrivateUsers=full','PrivatePIDs=yes','MountAPIVFS=yes','BindLogSockets=no',
                     'ProtectKernelTunables=yes','ProtectKernelModules=yes','ProtectKernelLogs=yes',
                     'ProtectControlGroups=strict','RestrictNamespaces=yes','RestrictSUIDSGID=yes',
-                    'RestrictAddressFamilies=AF_UNIX AF_INET','SystemCallFilter=~@mount @module @reboot @swap @raw-io','SystemCallErrorNumber=EPERM',
+                    'RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK','SystemCallFilter=~@mount @module @reboot @swap @raw-io','SystemCallErrorNumber=EPERM',
                     'TemporaryFileSystem=/run /tmp','MemoryMax=128M','CPUQuota=25%','TasksMax=32',
                     'RuntimeMaxSec=60','KillMode=control-group','TimeoutStopSec=5']
         try:
