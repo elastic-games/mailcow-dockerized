@@ -148,6 +148,26 @@ if int(sys.argv[3])==200:
             run(['ip', 'netns', 'add', namespace]); created = True
             run(['ip', '-n', namespace, 'link', 'set', 'lo', 'up'])
             run(['ip', 'netns', 'exec', namespace, 'sysctl', '-qw', 'net.ipv4.ip_unprivileged_port_start=0'])
+            identity_probe = '''import os,pathlib,json
+assert os.getuid()==5000 and os.getgid()==5000
+expected=set(map(int,os.environ.get('EXPECTED_GROUPS','5000').split(',')))
+assert set(os.getgroups())==expected
+status=dict(line.split(':',1) for line in pathlib.Path('/proc/self/status').read_text().splitlines() if ':' in line)
+assert all(int(status[key].strip(),16)==0 for key in ('CapEff','CapPrm','CapAmb'))
+for name in ('lease.lock','generation.json'):
+ try:open('/run/mailcow-lease/'+name,'rb')
+ except PermissionError:pass
+ else:raise AssertionError('Dropped child opened protected canonical control')
+for link in pathlib.Path('/proc/self/fd').iterdir():
+ try:target=os.readlink(link)
+ except FileNotFoundError:continue
+ assert not target.endswith(('lease.lock','generation.json'))
+print(json.dumps({'packagedVmailIdentity':True,'effectivePermittedAmbientCapsEmpty':True,'protectedControlUnreadable':True,'noInheritedControlFD':True}))
+'''
+            # Same actual command wrapper/profile as maintenance actions; root
+            # parent owns the lease, service-account child cannot open it.
+            code, identity = executor.command('mailcow-dovecot.service', ('/usr/bin/python3', '-c', identity_probe), 'vmail')
+            assert code == 0 and json.loads(identity)['protectedControlUnreadable']
             properties = profiles['mailcow-dovecot.service'].properties()
             run(['/usr/bin/systemd-run', '--quiet', '--unit=mailcow-dovecot.service', *['--property=' + prop for prop in properties],
                  '--', '/run/mailcow-log-pipe', '--lease-dir', '/run/mailcow-lease', '--generation', 'native', '--', '/usr/sbin/dovecot', '-F'])
@@ -231,6 +251,8 @@ with CanonicalStore(sys.argv[2]).lease('native'):
                        'spoolBudgetReleased': True, 'signedDuplicateAfterRestartDenied': True,
                        'supervisedBeyond60sCompleted': True, 'writerLeaseBlockedTransition': True,
                        'killedControllerSurvivingActionBlockedTransition': True,
+                       'nonrootChildCapsEmptyAndGroupsPreserved': True,
+                       'droppedChildCannotReadOrInheritControl': True,
                        'devStdoutReopenPreserved': True, 'noProductionDataOrOutbound': True}
         finally:
             # Fresh disposable CI units only: logs contain synthetic fixtures,
