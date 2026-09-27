@@ -81,7 +81,7 @@ def calendar(job, timezone):
 def render_units(profiles, launcher, timezone):
     if set(profiles) != set(UNITS.values()): raise ValueError('Complete closed service profile registry required')
     safe_path(launcher)
-    units = {JOB_SLICE: '[Unit]\nDescription=Isolated mail scheduled jobs\n[Slice]\nCPUAccounting=yes\nMemoryAccounting=yes\nTasksAccounting=yes\n'}
+    units = {JOB_SLICE: '[Unit]\nDescription=Isolated mail scheduled jobs\n[Slice]\nMemoryAccounting=yes\nTasksAccounting=yes\n'}
     for job in JOBS:
         profile = profiles[UNITS[job.service]]
         if profile.environment_file is None: raise ValueError('Reviewed packaged job environment required')

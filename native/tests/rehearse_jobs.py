@@ -6,7 +6,6 @@ synthetic fixture units are installed temporarily; no network or mail jobs run.
 from dataclasses import replace
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import time
 from canonical_store import ClosedCgroupProbe
@@ -21,14 +20,20 @@ def rehearse_jobs(profiles, store, scratch, adapter):
     environment = scratch / 'job-environment'; environment.write_text('MASTER=fixture\nTZ=America/New_York\n'); environment.chmod(0o600)
     reviewed = {unit: replace(value, environment_file=environment) for unit, value in profiles.items()}
     rendered = render_units(reviewed, Path(__file__).resolve().parents[1] / 'job_launcher.py', 'America/New_York')
-    # verify checks the RootDirectory executable before runtime bind mounts.
-    # Copy only this synthetic static guard into the disposable extracted root.
-    wrapper = profile.root / 'run/mailcow-log-pipe'; wrapper.parent.mkdir(exist_ok=True); shutil.copy2(adapter, wrapper)
+    # verify checks ExecStart against the HOST path, without RootDirectory or
+    # runtime binds. The actual isolated guard path is separately exercised by
+    # the scoped admin fixture. Supply its same static executable on this fresh
+    # disposable builder only while verifying; never overwrite an existing one.
+    host_guard = Path('/run/mailcow-log-pipe')
     unit_dir = scratch / 'rendered-jobs'; unit_dir.mkdir()
     for name, body in rendered.items(): (unit_dir / name).write_text(body)
-    try: run(['/usr/bin/systemd-analyze', 'verify', '--man=no', *map(str, unit_dir.iterdir())], capture_output=True)
-    except subprocess.CalledProcessError as error:
-        raise RuntimeError('Synthetic unit verification failed: ' + error.stderr.decode()[-8192:]) from None
+    with host_guard.open('xb') as file: file.write(adapter.read_bytes())
+    try:
+        host_guard.chmod(0o755)
+        try: run(['/usr/bin/systemd-analyze', 'verify', '--man=no', *map(str, unit_dir.iterdir())], capture_output=True)
+        except subprocess.CalledProcessError as error:
+            raise RuntimeError('Synthetic unit verification failed: ' + error.stderr.decode()[-8192:]) from None
+    finally: host_guard.unlink()
     dst = run(['/usr/bin/systemd-analyze', 'calendar', '--base-time=2026-03-08 00:00:00 UTC', '--iterations=2',
                '*-*-* 00:00:00 America/New_York'], capture_output=True, text=True).stdout
     assert '2026-03-08 05:00:00' in dst and '2026-03-09 04:00:00' in dst
