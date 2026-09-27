@@ -1,0 +1,38 @@
+name: Native Mail Packaged Startup Rehearsal
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  packaged-startup:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install offhost packaged-root metadata and namespace tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends skopeo iproute2 nftables python3-yaml gcc mariadb-client
+      - name: Download exact retained public roots from reviewed exporter run
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 36343120471
+          pattern: native-rootfs-*
+          merge-multiple: false
+          path: ${{ runner.temp }}/mailcow-native-pinned-roots
+      - name: Actual isolated packaged Redis MariaDB PHP bootstrap
+        run: |
+          sudo python3 native/tests/rehearse_packaged_startup.py \
+            --artifacts "$RUNNER_TEMP/mailcow-native-pinned-roots" \
+            --output "$RUNNER_TEMP/mailcow-packaged-startup.json"
+      - name: Retain only sanitized synthetic readiness receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: mailcow-packaged-startup-rehearsal
+          path: ${{ runner.temp }}/mailcow-packaged-startup.json
+          retention-days: 30

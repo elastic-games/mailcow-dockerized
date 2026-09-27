@@ -24,7 +24,11 @@ from rooted_paths import rooted_directory
 MAX_OUTPUT = 4 * 1024 * 1024
 MASTER_CAPS = ('CHOWN', 'DAC_OVERRIDE', 'DAC_READ_SEARCH', 'FOWNER', 'FSETID', 'SETGID', 'SETUID', 'SYS_CHROOT', 'KILL')
 CAPS = {'mailcow-unbound.service': ('SETUID', 'SETGID'),
-        'mailcow-postfix.service': MASTER_CAPS, 'mailcow-dovecot.service': MASTER_CAPS}
+        'mailcow-postfix.service': MASTER_CAPS, 'mailcow-dovecot.service': MASTER_CAPS,
+        # Packaged SQL/PHP bootstrap chowns state then uses gosu/FPM setuid.
+        # No SYS_CHROOT, NET_ADMIN, SYS_ADMIN or raw socket capability.
+        'mailcow-mariadb.service': ('CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID', 'KILL'),
+        'mailcow-php-fpm.service': ('CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID', 'KILL')}
 
 
 def manager_unit_absent(unit, runner=None):
@@ -98,13 +102,13 @@ class Profile:
     def account(self, user):
         # Resolve inside immutable root, not host passwd (UID999 overlaps).
         rows = [line.split(':') for line in (self.root / 'etc/passwd').read_text().splitlines()]
-        account = next((row for row in rows if row[0] == user), None)
+        account = next((row for row in rows if row[0] == user or user.isdigit() and row[2] == user), None)
         if not account or not account[2].isdigit() or not account[3].isdigit():
             raise ValueError('Packaged service account absent')
         groups = {int(account[3])}
         for row in (self.root / 'etc/group').read_text().splitlines():
             fields = row.split(':')
-            if len(fields) == 4 and fields[2].isdigit() and user in fields[3].split(','): groups.add(int(fields[2]))
+            if len(fields) == 4 and fields[2].isdigit() and account[0] in fields[3].split(','): groups.add(int(fields[2]))
         return account[2], account[3], ','.join(map(str, sorted(groups)))
 
     def properties(self, user='root', action_wrapper=False):
