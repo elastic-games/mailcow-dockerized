@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test closed policies, Unix framing, spool lifetime and actual renameat2
         run: |
-          python3 -m unittest discover -s native/tests -p 'test*.py'
+          sudo python3 -m unittest discover -s native/tests -p 'test*.py'
           bash -n data/Dockerfiles/acme/reload-configurations.sh
           bash -n data/Dockerfiles/dovecot/sa-rules.sh
           bash -n data/Dockerfiles/phpfpm/docker-entrypoint.sh

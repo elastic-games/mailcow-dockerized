@@ -33,10 +33,20 @@ class FixtureRedis:
         return 1
 
 
+class FixtureExecutor(Executor):
+    def command(self, *args, **kwargs):
+        code, output = super().command(*args, **kwargs)
+        # This executor exists only in fresh off-host synthetic fixtures. Keep
+        # failure diagnosis out of production HTTP responses and never log argv.
+        if code and isinstance(output, bytes):
+            print('Synthetic fixture action diagnostic:', code, output[:8192].decode('utf-8', 'replace'), file=sys.stderr)
+        return code, output
+
+
 def rehearse(artifacts, output):
     if sys.platform != 'linux' or os.geteuid() != 0: raise RuntimeError('Off-host root Linux only')
     artifact, source = validate(artifacts, 'dovecot-mailcow')
-    units = ['mailcow-dovecot.service', 'mailcow-php-fpm.service', 'mailcow-watchdog.service', 'mailcow-unregistered-fixture.service', 'mailcow-slow-fixture.service']
+    units = ['mailcow-dovecot.service', 'mailcow-php-fpm.service', 'mailcow-watchdog.service', 'mailcow-unregistered-fixture.service', 'mailcow-slow-fixture.service', 'mailcow-action-crash-fixture.service']
     namespace = 'mailcow-control-fixture'
     active = []; created = False; server = None
     with tempfile.TemporaryDirectory(prefix='native-control-') as temp:
@@ -104,7 +114,7 @@ plugin {
         writable = ((mail, '/var/vmail'), (index, '/var/vmail_index'), (runtime, '/run/dovecot'))
         profiles = {unit: Profile(unit, root, Path('/run/netns') / namespace, readonly, writable) for unit in UNITS.values()}
         redis = FixtureRedis(); observer = Observer(profiles, redis)
-        executor = Executor(profiles, observer, lambda *_: None, {}, store, budget)
+        executor = FixtureExecutor(profiles, observer, lambda *_: None, {}, store, budget)
         dispatcher = Dispatcher(executor, 'synthetic', {service: '127.0.0.1' for service in UNITS})
         socket_path = scratch / 'control.sock'; server = ControlServer(socket_path, dispatcher)
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()

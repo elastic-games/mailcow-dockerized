@@ -33,6 +33,7 @@ class SpoolTests(unittest.TestCase):
     def test_profile_has_no_universal_maintenance_kill_limits(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); (root / 'etc').mkdir(); (root / 'etc/passwd').write_text('root:x:0:0:root:/root:/bin/sh\n')
+            (root / 'etc/group').write_text('root:x:0:\n')
             profile = Profile('mailcow-dovecot.service', root, Path('/run/netns/fixture'), (), ())
             values = profile.properties()
             for key in ('RuntimeMaxSec', 'MemoryMax', 'CPUQuota', 'TasksMax', 'TimeoutStopSec'):

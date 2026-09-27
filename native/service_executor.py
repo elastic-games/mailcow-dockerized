@@ -94,25 +94,35 @@ class Profile:
     writable: tuple[tuple[Path, str], ...]
     environment_file: Path | None = None
 
-    def properties(self, user='root'):
-        if self.unit not in UNITS.values(): raise ValueError('Unregistered service profile')
+    def account(self, user):
         # Resolve inside immutable root, not host passwd (UID999 overlaps).
         rows = [line.split(':') for line in (self.root / 'etc/passwd').read_text().splitlines()]
         account = next((row for row in rows if row[0] == user), None)
         if not account or not account[2].isdigit() or not account[3].isdigit():
             raise ValueError('Packaged service account absent')
+        groups = {int(account[3])}
+        for row in (self.root / 'etc/group').read_text().splitlines():
+            fields = row.split(':')
+            if len(fields) == 4 and fields[2].isdigit() and user in fields[3].split(','): groups.add(int(fields[2]))
+        return account[2], account[3], ','.join(map(str, sorted(groups)))
+
+    def properties(self, user='root', action_wrapper=False):
+        if self.unit not in UNITS.values(): raise ValueError('Unregistered service profile')
+        uid, gid, groups = self.account(user)
+        caps = set(CAPS.get(self.unit, ())) if user == 'root' else set()
+        if action_wrapper: caps |= {'SETUID', 'SETGID', 'KILL'}
         properties = ['RootDirectory=' + safe_path(self.root), 'NetworkNamespacePath=' + safe_path(self.network_namespace),
-                      'User=' + account[2], 'Group=' + account[3], 'PrivateUsers=full', 'PrivatePIDs=yes',
+                      'User=' + uid, 'Group=' + gid, 'PrivateUsers=full', 'PrivatePIDs=yes',
                       'MountAPIVFS=yes', 'PrivateDevices=yes', 'BindLogSockets=no', 'ProtectSystem=strict',
                       'ProtectHome=yes', 'NoNewPrivileges=yes', 'ProtectControlGroups=strict',
                       'ProtectKernelTunables=yes', 'ProtectKernelModules=yes', 'ProtectKernelLogs=yes',
                       'RestrictNamespaces=yes', 'RestrictSUIDSGID=yes',
                       'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK',
                       'SystemCallFilter=~mount umount2 pivot_root move_mount open_tree fsopen fsconfig fsmount mount_setattr @module @reboot @swap @raw-io',
-                      'SystemCallErrorNumber=EPERM', 'CapabilityBoundingSet=' + ' '.join('CAP_' + cap for cap in CAPS.get(self.unit, ()) if user == 'root'),
+                      'SystemCallErrorNumber=EPERM', 'CapabilityBoundingSet=' + ' '.join('CAP_' + cap for cap in sorted(caps)),
                       # Foreground lease/log wrapper execs the packaged daemon;
                       # required capabilities must survive that extra exec.
-                      'AmbientCapabilities=' + ' '.join('CAP_' + cap for cap in CAPS.get(self.unit, ()) if user == 'root'),
+                      'AmbientCapabilities=' + ' '.join('CAP_' + cap for cap in sorted(caps)),
                       'TemporaryFileSystem=/run /tmp', 'KillMode=control-group']
         for field, bindings in (('BindReadOnlyPaths', self.readonly), ('BindPaths', self.writable)):
             for source, destination in bindings:
@@ -135,8 +145,11 @@ class Executor:
     def command(self, unit, argv, user='root', data=b'', text_maximum=None):
         if unit not in self.profiles or not argv or not argv[0].startswith('/'): raise ValueError('Fixed service command required')
         action_unit = 'mailcow-action-' + uuid.uuid4().hex + '.service'
+        profile = self.profiles[unit]; uid, gid, groups = profile.account(user)
         command = ['/usr/bin/systemd-run', '--quiet', '--wait', '--pipe', '--collect', '--slice=mailcow-actions.slice', '--unit=' + action_unit,
-                   *['--property=' + value for value in self.profiles[unit].properties(user)], '--', *argv]
+                   *['--property=' + value for value in profile.properties('root', action_wrapper=True)], '--',
+                   '/run/mailcow-log-pipe', '--lease-dir', '/run/mailcow-lease', '--generation', 'native',
+                   '--uid', uid, '--gid', gid, '--groups', groups, '--', *argv]
         spool = self.spool_budget.open(text_maximum) if text_maximum is not None else None
         with self.store.lease('native'):
             try:

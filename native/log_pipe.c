@@ -7,6 +7,8 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
+#include <stdint.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,11 +22,30 @@
 static volatile sig_atomic_t child_pid;
 static void forward(int sig) { if (child_pid > 0) kill(-child_pid, sig); }
 static void fail(const char *msg) { fprintf(stderr, "native foreground adapter: %s\n", msg); exit(111); }
+static unsigned number(const char *value) {
+    if (!*value || *value == '-' || *value == '+') fail("invalid account id");
+    char *end; errno = 0; unsigned long parsed = strtoul(value, &end, 10);
+    if (errno || *end || parsed >= UINT32_MAX) fail("invalid account id");
+    return (unsigned) parsed;
+}
 
 int main(int argc, char **argv) {
-    if (argc < 7 || strcmp(argv[1], "--lease-dir") || strcmp(argv[3], "--generation") || strcmp(argv[5], "--"))
+    if (argc < 7 || strcmp(argv[1], "--lease-dir") || strcmp(argv[3], "--generation"))
         fail("fixed lease/generation and executable required");
     if (strcmp(argv[4], "native") && strcmp(argv[4], "legacy")) fail("invalid writer generation");
+    int command = 5, credentials = 0;
+    uid_t uid = 0; gid_t gid = 0, groups[64]; size_t group_count = 0;
+    if (argc > 11 && !strcmp(argv[5], "--uid") && !strcmp(argv[7], "--gid") && !strcmp(argv[9], "--groups")) {
+        credentials = 1; uid = number(argv[6]); gid = number(argv[8]);
+        char *list = strdup(argv[10]); if (!list) fail("allocation failed");
+        for (char *part = strtok(list, ","); part; part = strtok(NULL, ",")) {
+            if (group_count == 64) fail("too many supplementary groups");
+            groups[group_count++] = number(part);
+        }
+        free(list); command = 11;
+    }
+    if (command + 1 >= argc || strcmp(argv[command], "--")) fail("executable boundary required");
+    command++;
     int directory = open(argv[2], O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
     if (directory < 0) fail("lease directory unavailable");
     int lease = openat(directory, "lease.lock", O_RDONLY | O_NOFOLLOW);
@@ -50,7 +71,9 @@ int main(int argc, char **argv) {
     if (!pid) {
         setpgid(0, 0); close(pipes[0]); close(lease);
         if (dup2(pipes[1], STDOUT_FILENO) < 0 || dup2(pipes[1], STDERR_FILENO) < 0) _exit(111);
-        close(pipes[1]); execv(argv[6], &argv[6]); _exit(111);
+        close(pipes[1]);
+        if (credentials && (setgroups(group_count, groups) || setgid(gid) || setuid(uid))) _exit(111);
+        execv(argv[command], &argv[command]); _exit(111);
     }
     child_pid = pid; setpgid(pid, pid); close(pipes[1]);
     char buffer[16384]; ssize_t count;
