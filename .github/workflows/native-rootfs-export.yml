@@ -51,9 +51,14 @@ jobs:
       - name: Install off-host exporter tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends skopeo umoci
+          sudo apt-get install -y --no-install-recommends skopeo umoci iproute2 iputils-ping nftables
           skopeo --version
           umoci --version
+      - name: Rehearse root ancestry, 18 isolated namespaces and real controller peer shutdown
+        if: matrix.service == 'dovecot-mailcow'
+        run: |
+          sudo mkdir -p "$RUNNER_TEMP/mailcow-native-artifacts"
+          sudo python3 native/tests/rehearse_controller_network.py --output "$RUNNER_TEMP/mailcow-native-artifacts/controller-network-rehearsal.json"
       - name: Export pinned upstream root tree and isolated version probe
         env:
           SERVICE: ${{ matrix.service }}
